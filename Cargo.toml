@@ -1,0 +1,6 @@
+[package]
+name = "jpeg-rust"
+version = "0.1.0"
+authors = ["Martin Thoresen <martinhath@gmail.com>"]
+
+[dependencies]
