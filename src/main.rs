@@ -10,13 +10,13 @@ use jpeg::jfif::*;
 const Pi: f32 = PI as f32;
 
 struct SquareMatrix {
-    dimention: usize,
+    dimension: usize,
     values: Vec<f32>,
 }
 
 impl SquareMatrix {
     fn print(&self) {
-        let d = self.dimention;
+        let d = self.dimension;
         for i in 0..d {
             for j in 0..d {
                 let a = d * i + j;
@@ -36,7 +36,7 @@ fn discrete_cosine_transform(mat: &SquareMatrix) -> SquareMatrix {
             1f32
         }
     };
-    let d = mat.dimention;
+    let d = mat.dimension;
     let mut vec = Vec::with_capacity(mat.values.len());
 
     for v in 0..d {
@@ -65,7 +65,7 @@ fn discrete_cosine_transform(mat: &SquareMatrix) -> SquareMatrix {
     }
 
     SquareMatrix {
-        dimention: d,
+        dimension: d,
         values: vec,
     }
 }
@@ -78,7 +78,7 @@ fn discrete_cosine_transform_inverse(mat: &SquareMatrix) -> SquareMatrix {
             1f32
         }
     };
-    let d = mat.dimention;
+    let d = mat.dimension;
     let mut vec = Vec::with_capacity(d * d);
 
     for y in 0..d {
@@ -103,16 +103,16 @@ fn discrete_cosine_transform_inverse(mat: &SquareMatrix) -> SquareMatrix {
 
 
     SquareMatrix {
-        dimention: d,
+        dimension: d,
         values: vec,
     }
 }
 
 // TODO: do this not retarded
 fn inner_div_round(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
-    let d = a.dimention;
-    if d != b.dimention {
-        panic!("Matrix dimentions must be the same");
+    let d = a.dimension;
+    if d != b.dimension {
+        panic!("Matrix dimensions must be the same");
     }
     let mut vec = Vec::with_capacity(d * d);
     for j in 0..d {
@@ -122,16 +122,16 @@ fn inner_div_round(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
         }
     }
     SquareMatrix {
-        dimention: d,
+        dimension: d,
         values: vec,
     }
 }
 
 // TODO: do this not retarded
 fn inner_mul(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
-    let d = a.dimention;
-    if d != b.dimention {
-        panic!("Matrix dimentions must be the same");
+    let d = a.dimension;
+    if d != b.dimension {
+        panic!("Matrix dimensions must be the same");
     }
     let mut vec = Vec::with_capacity(d * d);
     for j in 0..d {
@@ -141,7 +141,7 @@ fn inner_mul(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
         }
     }
     SquareMatrix {
-        dimention: d,
+        dimension: d,
         values: vec,
     }
 }
@@ -178,7 +178,7 @@ fn encode(mat: SquareMatrix) -> SquareMatrix {
 
 fn quantization_matrix() -> SquareMatrix {
     SquareMatrix {
-        dimention: 8,
+        dimension: 8,
         values: vec![16f32, 11f32, 10f32, 16f32, 24f32, 40f32, 51f32, 61f32, 12f32, 12f32, 14f32,
                      19f32, 26f32, 58f32, 60f32, 55f32, 14f32, 13f32, 16f32, 24f32, 40f32, 57f32,
                      69f32, 56f32, 14f32, 17f32, 22f32, 29f32, 51f32, 87f32, 80f32, 62f32, 18f32,
@@ -191,7 +191,7 @@ fn quantization_matrix() -> SquareMatrix {
 
 fn encoded_matrix() -> SquareMatrix {
     SquareMatrix {
-        dimention: 8,
+        dimension: 8,
         values: vec![-26f32, -3f32, -6f32, 2f32, 2f32, -1f32, 0f32, 0f32, 0f32, -2f32, -4f32,
                      1f32, 1f32, 0f32, 0f32, 0f32, -3f32, 1f32, 5f32, -1f32, -1f32, 0f32, 0f32,
                      0f32, -3f32, 1f32, 2f32, -1f32, 0f32, 0f32, 0f32, 0f32, 1f32, 0f32, 0f32,
@@ -203,7 +203,7 @@ fn encoded_matrix() -> SquareMatrix {
 
 fn sample_matrix() -> SquareMatrix {
     SquareMatrix {
-        dimention: 8,
+        dimension: 8,
         values: vec![52f32, 55f32, 61f32, 66f32, 70f32, 61f32, 64f32, 73f32, 63f32, 59f32, 55f32,
                      90f32, 109f32, 85f32, 69f32, 72f32, 62f32, 59f32, 68f32, 113f32, 144f32,
                      104f32, 66f32, 73f32, 63f32, 58f32, 71f32, 122f32, 154f32, 106f32, 70f32,
@@ -215,7 +215,7 @@ fn sample_matrix() -> SquareMatrix {
 }
 
 fn error_matrix(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
-    let d = a.dimention;
+    let d = a.dimension;
     let mut vec = Vec::with_capacity(d * d);
     for y in 0..d {
         for x in 0..d {
@@ -224,7 +224,7 @@ fn error_matrix(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
         }
     }
     SquareMatrix {
-        dimention: d,
+        dimension: d,
         values: vec,
     }
 }
@@ -240,17 +240,17 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let mut matrix = sample_matrix();
-    let encoded = encode(matrix);
-    let decoded = decode(encoded);
+    // let mut matrix = sample_matrix();
+    // let encoded = encode(matrix);
+    // let decoded = decode(encoded);
 
-    let error = error_matrix(&sample_matrix(), &decoded);
-    error.print();
+    // let error = error_matrix(&sample_matrix(), &decoded);
+    // error.print();
 
-    let bytes = file_to_bytes(Path::new("./lena.jpeg"));
-    let header = bytes.iter().take(64);
+    let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
+
     let mut i = 0;
-    for byte in header {
+    for byte in bytes.iter().take(64) {
         i += 1;
         print!("{:02x} ", byte);
         if i % 16 == 0 && i != 0 {
@@ -258,6 +258,12 @@ fn main() {
         }
     }
 
-    let header = JFIFHeader::parse(&bytes);
-    println!("{:?}", header);
+    let image = JFIFImage::parse(bytes).unwrap();
+
+    let first = image.get_nth_square(0);
+    let mat = SquareMatrix {
+        dimension: 8,
+        values: first.to_owned().iter().map(|b| *b as f32).collect(),
+    };
+    let decoded = decode(mat);
 }

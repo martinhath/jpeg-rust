@@ -43,15 +43,19 @@ type JPEGDimensions = (u16, u16);
 type ThumbnailDimensions = (u8, u8);
 
 #[derive(Debug)]
-pub struct JFIFHeader {
+pub struct JFIFImage {
     version: JFIFVersion,
     units: JFIFUnits,
     dimensions: JPEGDimensions,
     thumbnail_dimensions: ThumbnailDimensions,
+
+    // tmp
+    data_index: usize,
+    raw_data: Vec<u8>,
 }
 
-impl JFIFHeader {
-    pub fn parse(vec: &Vec<u8>) -> Result<JFIFHeader, String> {
+impl JFIFImage {
+    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
         // you can identify a JFIF file by looking for the following sequence:
         //
         //      X'FF', SOI, X'FF', APP0, <2 bytes to be skipped>, "JFIF", X'00'.
@@ -66,19 +70,32 @@ impl JFIFHeader {
             return Err("Header mismatch".to_string());
         }
         let version = try!(JFIFVersion::from_bytes(vec[11], vec[12]));
-        println!("version: {:?}", version);
 
         let units = try!(JFIFUnits::from_u8(vec[13]));
-        println!("units: {:?}", units);
         let x_density = u8s_to_u16(&vec[14..16]);
         let y_density = u8s_to_u16(&vec[16..18]);
         let thumbnail_dimensions = (vec[18], vec[19]);
 
-        Ok(JFIFHeader {
+        // TODO: thumbnail data?
+        let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
+        let data_index = 20 + 3 * n;
+
+
+        Ok(JFIFImage {
             version: version,
             units: units,
             dimensions: (x_density, y_density),
             thumbnail_dimensions: thumbnail_dimensions,
+            data_index: data_index,
+            raw_data: vec,
         })
+    }
+
+    pub fn get_nth_square(&self, n: usize) -> &[u8] {
+        // let square_size = self.dimensions.0 as usize * self.dimensions.1 as usize;
+        let square_size = 8 * 8;
+        let a = self.data_index + square_size * n;
+        let b = a + square_size;
+        &self.raw_data[a..b]
     }
 }
