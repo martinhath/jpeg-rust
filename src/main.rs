@@ -1,5 +1,9 @@
 use std::f32;
 use std::f32::consts::PI;
+use std::path::Path;
+use std::fs::File;
+
+use std::io::Read;
 
 const Pi: f32 = PI as f32;
 
@@ -223,6 +227,22 @@ fn error_matrix(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
     }
 }
 
+fn parse_jfif_header(vec: &Vec<u8>) {
+    // you can identify a JFIF file by looking for the following sequence:
+    //
+    //      X'FF', SOI, X'FF', APP0, <2 bytes to be skipped>, "JFIF", X'00'.
+}
+
+fn file_to_bytes(path: &Path) -> Vec<u8> {
+    if let Ok(file) = File::open(path) {
+        return file.bytes()
+            .filter(Result::is_ok)
+            .map(Result::unwrap)
+            .collect();
+    }
+    panic!("Coult not open file.")
+}
+
 fn main() {
     let mut matrix = sample_matrix();
     let encoded = encode(matrix);
@@ -230,6 +250,18 @@ fn main() {
 
     let error = error_matrix(&sample_matrix(), &decoded);
     error.print();
+
+    let bytes = file_to_bytes(Path::new("./lena.jpeg"));
+    let header = bytes.iter().take(64);
+    let mut i = 0;
+    for byte in header {
+        i += 1;
+        print!("{:02x} ", byte);
+        if i % 16 == 0 && i != 0 {
+            print!("\n");
+        }
+    }
+
 
     println!("");
 }
