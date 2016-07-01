@@ -258,7 +258,6 @@ fn main() {
         }
     }
 
-    JFIFHeader::parse(&bytes);
-
-    println!("");
+    let header = JFIFHeader::parse(&bytes);
+    println!("{:?}", header);
 }
