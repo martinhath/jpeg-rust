@@ -96,14 +96,14 @@ impl JFIFImage {
 
         let mut i = 20;
         loop {
+            // All segments have a 2 byte length
+            // right after the marker code
+            let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
             match (vec[i], vec[i + 1]) {
                 (0xff, 0xfe) => {
                     // Comment
                     use std::str;
-                    let comment_length = bytes_to_len(vec[i + 2], vec[i + 3]);
-                    println!("comment_length: {}", comment_length);
-                    let comment: String = match str::from_utf8(&vec[i + 4..i + 4 +
-                                                                           comment_length]) {
+                    let comment: String = match str::from_utf8(&vec[i + 4..i + 4 + data_length]) {
                         Ok(s) => s.to_string(),
                         Err(e) => {
                             println!("{}", e);
@@ -112,30 +112,59 @@ impl JFIFImage {
                     };
                     println!("found comment '{}'", comment);
                     // Comment_length plus the two size bytes
-                    i += 2 + comment_length;
                 }
                 (0xff, 0xdb) => {
                     // Quantization tables
-                    // JPEG B2.4.1
+                    // JPEG B.2.4.1
 
-                    let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
                     let p_q = (vec[i + 4] & 0xf0) >> 4;
                     let t_q = (vec[i + 4] & 0x0f);
                     let quant_values = &vec[i + 5..i + 4 + data_length];
 
                     // Do whatever
-
-                    i += 2 + data_length;
                 }
                 (0xff, 0xc0) => {
-                    print_vector(vec.iter().skip(i));
+                    // Baseline DCT
+                    // JPEG B.2.2
+
+                    // TODO: Make use of this
+                }
+                (0xff, 0xc4) => {
+                    // Define Huffman table
+                    // JPEG B.2.4.2
+                    let table_class = (vec[i + 4] & 0xf0) >> 4;
+                    let table_dest_id = vec[i + 4] & 0x0f;
+                    println!("Huffman table: len: {}\tclass: {}\tdest_id: {}",
+                             data_length,
+                             table_class,
+                             table_dest_id);
+
+                    let code_count = &vec[i + 5..i + 5 + 16];
+                    let code_values = &vec[i + 5 + 16 + 1..i + data_length + 4];
+                    let mut code_val_index = 0;
+
+                    // TODO: remove, sample printing
+                    for n in 0..16 {
+                        // n + 1 bits for each code
+                        for _ in 0..code_count[n] {
+                            println!("Theres a code of length {} with value {}",
+                                     n + 1,
+                                     code_values[code_val_index]);
+                            code_val_index += 1;
+                        }
+                    }
+
+                    print_vector(vec.iter().skip(i + 4).take(data_length));
                 }
                 _ => {
-                    // print_vector(vec.iter().skip(i));
-                    panic!("Unhandled byte marker: {:x} {:x}", vec[i], vec[i + 1]);
+                    println!("\n\nUnhandled byte marker: {:02x} {:02x}",
+                             vec[i],
+                             vec[i + 1]);
+                    print_vector(vec.iter().skip(i));
+                    panic!();
                 }
             }
-            i += 2;
+            i += 4 + data_length;
         }
 
 
@@ -166,5 +195,8 @@ fn print_vector<I>(iter: I)
         if i % 16 == 0 && i != 0 {
             print!("\n");
         }
+    }
+    if i % 16 != 0 || i == 0 {
+        print!("\n");
     }
 }
