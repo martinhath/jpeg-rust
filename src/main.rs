@@ -249,15 +249,6 @@ fn main() {
 
     let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
 
-    let mut i = 0;
-    for byte in bytes.iter().take(64) {
-        i += 1;
-        print!("{:02x} ", byte);
-        if i % 16 == 0 && i != 0 {
-            print!("\n");
-        }
-    }
-
     let image = JFIFImage::parse(bytes).unwrap();
 
     let first = image.get_nth_square(0);
