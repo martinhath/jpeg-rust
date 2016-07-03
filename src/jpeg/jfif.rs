@@ -1,3 +1,4 @@
+use jpeg::huffman;
 
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
@@ -139,19 +140,21 @@ impl JFIFImage {
                              table_class,
                              table_dest_id);
 
-                    let code_count = &vec[i + 5..i + 5 + 16];
-                    let code_values = &vec[i + 5 + 16 + 1..i + data_length + 4];
-                    let mut code_val_index = 0;
+                    let size_table = huffman::make_size_table(&vec[i + 5..i + 5 + 16]);
+                    let code_table = huffman::make_code_table(&size_table);
 
-                    // TODO: remove, sample printing
-                    for n in 0..16 {
-                        // n + 1 bits for each code
-                        for _ in 0..code_count[n] {
-                            println!("Theres a code of length {} with value {}",
-                                     n + 1,
-                                     code_values[code_val_index]);
-                            code_val_index += 1;
+                    let mut i = 0;
+                    for n in size_table.iter() {
+                        if i >= code_table.len() {
+                            break;
                         }
+                        let len = *n;
+                        println!("code {} has length {}:\t{}",
+                                 i,
+                                 len,
+                                 code_table[i],
+                                 );
+                        i += 1;
                     }
 
                     print_vector(vec.iter().skip(i + 4).take(data_length));
