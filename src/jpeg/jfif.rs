@@ -140,24 +140,17 @@ impl JFIFImage {
                              table_class,
                              table_dest_id);
 
-                    let size_table = huffman::make_size_table(&vec[i + 5..i + 5 + 16]);
-                    let code_table = huffman::make_code_table(&size_table);
+                    let size_area: &[u8] = &vec[i + 5..i + 5 + 16];
+                    let data_area: &[u8] = &vec[i + 5 + 16..i + 4 + data_length];
+                    let data: Vec<u8> = huffman::decode(size_area, data_area);
 
-                    let mut i = 0;
-                    for n in size_table.iter() {
-                        if i >= code_table.len() {
-                            break;
-                        }
-                        let len = *n;
-                        println!("code {} has length {}:\t{}",
-                                 i,
-                                 len,
-                                 code_table[i],
-                                 );
-                        i += 1;
-                    }
+                    println!("{:?}", data);
+                }
+                (0xff, 0xda) => {
+                    // Start of Scan
+                    // JPEG B.2.3
+                    let num_components = vec[i + 4];
 
-                    print_vector(vec.iter().skip(i + 4).take(data_length));
                 }
                 _ => {
                     println!("\n\nUnhandled byte marker: {:02x} {:02x}",
