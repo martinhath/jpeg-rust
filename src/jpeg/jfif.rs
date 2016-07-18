@@ -1,4 +1,5 @@
 use jpeg::huffman;
+use std::iter;
 
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
@@ -32,10 +33,6 @@ pub enum JFIFVersion {
     V1_01,
 }
 
-
-
-
-
 impl JFIFVersion {
     pub fn from_bytes(msb: u8, lsb: u8) -> Result<JFIFVersion, String> {
         Ok(match (msb, lsb) {
@@ -55,6 +52,7 @@ pub struct JFIFImage {
     dimensions: JPEGDimensions,
     thumbnail_dimensions: ThumbnailDimensions,
     comment: Option<String>,
+    huffman_tables: Vec<Option<huffman::Table>>,
 
     // tmp
     data_index: usize,
@@ -87,11 +85,16 @@ impl JFIFImage {
         // TODO: thumbnail data?
         // let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
 
-        let jfif_image = JFIFImage {
+        let mut huffman_tables = Vec::with_capacity(16);
+        for _ in 0..16 {
+            huffman_tables.push(None);
+        }
+        let mut jfif_image = JFIFImage {
             version: version,
             units: units,
             dimensions: (x_density, y_density),
             thumbnail_dimensions: thumbnail_dimensions,
+            huffman_tables: huffman_tables,
 
             comment: None,
 
@@ -117,8 +120,7 @@ impl JFIFImage {
                             "".to_string()
                         }
                     };
-                    println!("found comment '{}'", comment);
-                    // Comment_length plus the two size bytes
+                    // println!("found comment '{}'", comment);
                 }
                 (0xff, 0xdb) => {
                     // Quantization tables
@@ -141,16 +143,17 @@ impl JFIFImage {
                     // JPEG B.2.4.2
                     let table_class = (vec[i + 4] & 0xf0) >> 4;
                     let table_dest_id = vec[i + 4] & 0x0f;
-                    println!("Huffman table: len: {}\tclass: {}\tdest_id: {}",
-                             data_length,
-                             table_class,
-                             table_dest_id);
+                    // println!("Huffman table: len: {}\tclass: {}\tdest_id: {}",
+                    //          data_length,
+                    //          table_class,
+                    //          table_dest_id);
 
+                    // There are size_area[i] number of codes of length i + 1.
                     let size_area: &[u8] = &vec[i + 5..i + 5 + 16];
+                    // Code i has value data_area[i]
                     let data_area: &[u8] = &vec[i + 5 + 16..i + 4 + data_length];
-                    let data: Vec<u8> = huffman::decode(size_area, data_area);
-
-                    // println!("{:?}", data);
+                    let huffman_table = huffman::Table::from_size_data_tables(size_area, data_area);
+                    jfif_image.huffman_tables.insert(table_dest_id as usize, Some(huffman_table));
                 }
                 (0xff, 0xda) => {
                     // Start of Scan
@@ -158,16 +161,27 @@ impl JFIFImage {
                     let num_components = vec[i + 4];
 
                     i += 2 * num_components as usize;
-                    let s_s = vec[i + 5];
-                    let s_e = vec[i + 6];
+                    let start_spectral_section = vec[i + 5];
+                    let end_spectral_section = vec[i + 6];
                     let al_ah = vec[i + 7];
+
+                    println!("start spectral section={}", start_spectral_section);
+                    println!("end spectral section={}", end_spectral_section);
 
                     // After the scan header is parsed, we start to read data.
                     // See Figure B.2 in B.2.1
                     print_vector(vec.iter().skip(i + 8));
                     // How long is the ECS?? Maybe it can be derived
                     // from values read in some headers.
+                    // If we are not using `restart`, there is only one segment.
+                    let data_length = end_spectral_section - start_spectral_section + 1;
+                    // Read `data_length`  values into `frequencies`
+                    let mut frequencies = Vec::<u8>::with_capacity(data_length as usize);
+                    let mut index = 0;
+                    while index < data_length {
+                    }
 
+                    i += data_length as usize;
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
