@@ -1,3 +1,5 @@
+#[allow(unused_variables)]
+#[allow(dead_code)]
 mod jpeg;
 use std::f32::consts::PI;
 use std::f32;
@@ -7,6 +9,7 @@ use std::path::Path;
 
 use jpeg::jfif::*;
 
+#[allow(non_upper_case_globals)]
 const Pi: f32 = PI as f32;
 
 struct SquareMatrix {
@@ -41,7 +44,6 @@ fn discrete_cosine_transform(mat: &SquareMatrix) -> SquareMatrix {
 
     for v in 0..d {
         for u in 0..d {
-            let index = v * d + u;
             let vf = v as f32;
             let uf = u as f32;
 
@@ -59,8 +61,8 @@ fn discrete_cosine_transform(mat: &SquareMatrix) -> SquareMatrix {
                     sum += prod;
                 }
             }
-            let Guv = alpha(u) * alpha(v) * sum / 4f32;
-            vec.push(Guv);
+            let g_uv = alpha(u) * alpha(v) * sum / 4f32;
+            vec.push(g_uv);
         }
     }
 
@@ -91,8 +93,8 @@ fn discrete_cosine_transform_inverse(mat: &SquareMatrix) -> SquareMatrix {
                     let uf = u as f32;
                     let vf = v as f32;
 
-                    let Fuv = mat.values[v * d + u];
-                    sum += alpha(u) * alpha(v) * Fuv *
+                    let f_uv = mat.values[v * d + u];
+                    sum += alpha(u) * alpha(v) * f_uv *
                            ((2f32 * xf + 1f32) * uf * Pi / 16f32).cos() *
                            ((2f32 * yf + 1f32) * vf * Pi / 16f32).cos();
                 }
@@ -146,6 +148,7 @@ fn inner_mul(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
     }
 }
 
+#[allow(dead_code)]
 fn decode(mat: SquareMatrix) -> SquareMatrix {
     println!("decode()");
     mat.print();
@@ -161,6 +164,7 @@ fn decode(mat: SquareMatrix) -> SquareMatrix {
     spatial
 }
 
+#[allow(dead_code)]
 fn encode(mat: SquareMatrix) -> SquareMatrix {
     println!("encode()");
     mat.print();
@@ -176,6 +180,7 @@ fn encode(mat: SquareMatrix) -> SquareMatrix {
 
 
 
+#[allow(dead_code)]
 fn quantization_matrix() -> SquareMatrix {
     SquareMatrix {
         dimension: 8,
@@ -189,6 +194,7 @@ fn quantization_matrix() -> SquareMatrix {
     }
 }
 
+#[allow(dead_code)]
 fn encoded_matrix() -> SquareMatrix {
     SquareMatrix {
         dimension: 8,
@@ -201,6 +207,7 @@ fn encoded_matrix() -> SquareMatrix {
     }
 }
 
+#[allow(dead_code)]
 fn sample_matrix() -> SquareMatrix {
     SquareMatrix {
         dimension: 8,
@@ -214,6 +221,7 @@ fn sample_matrix() -> SquareMatrix {
     }
 }
 
+#[allow(dead_code)]
 fn error_matrix(a: &SquareMatrix, b: &SquareMatrix) -> SquareMatrix {
     let d = a.dimension;
     let mut vec = Vec::with_capacity(d * d);
@@ -256,5 +264,5 @@ fn main() {
         dimension: 8,
         values: first.to_owned().iter().map(|b| *b as f32).collect(),
     };
-    let decoded = decode(mat);
+    let _ = decode(mat);
 }

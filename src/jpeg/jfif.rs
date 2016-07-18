@@ -27,9 +27,14 @@ impl JFIFUnits {
 }
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub enum JFIFVersion {
     V1_01,
 }
+
+
+
+
 
 impl JFIFVersion {
     pub fn from_bytes(msb: u8, lsb: u8) -> Result<JFIFVersion, String> {
@@ -53,9 +58,10 @@ pub struct JFIFImage {
 
     // tmp
     data_index: usize,
-    raw_data: Vec<u8>,
+    raw_data: Vec<u8>, // TOOD: add all options, such as progressive/sequential, etc.
 }
 
+#[allow(unused_variables)]
 impl JFIFImage {
     pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
         // you can identify a JFIF file by looking for the following sequence:
@@ -79,9 +85,9 @@ impl JFIFImage {
         let thumbnail_dimensions = (vec[18], vec[19]);
 
         // TODO: thumbnail data?
-        let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
+        // let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
 
-        let mut jfif_image = JFIFImage {
+        let jfif_image = JFIFImage {
             version: version,
             units: units,
             dimensions: (x_density, y_density),
@@ -119,7 +125,7 @@ impl JFIFImage {
                     // JPEG B.2.4.1
 
                     let p_q = (vec[i + 4] & 0xf0) >> 4;
-                    let t_q = (vec[i + 4] & 0x0f);
+                    let t_q = vec[i + 4] & 0x0f;
                     let quant_values = &vec[i + 5..i + 4 + data_length];
 
                     // Do whatever
@@ -144,29 +150,43 @@ impl JFIFImage {
                     let data_area: &[u8] = &vec[i + 5 + 16..i + 4 + data_length];
                     let data: Vec<u8> = huffman::decode(size_area, data_area);
 
-                    println!("{:?}", data);
+                    // println!("{:?}", data);
                 }
                 (0xff, 0xda) => {
                     // Start of Scan
                     // JPEG B.2.3
                     let num_components = vec[i + 4];
 
+                    i += 2 * num_components as usize;
+                    let s_s = vec[i + 5];
+                    let s_e = vec[i + 6];
+                    let al_ah = vec[i + 7];
+
+                    // After the scan header is parsed, we start to read data.
+                    // See Figure B.2 in B.2.1
+                    print_vector(vec.iter().skip(i + 8));
+                    // How long is the ECS?? Maybe it can be derived
+                    // from values read in some headers.
+
+                }
+                (0xff, 0xdd) => {
+                    // Restart Interval Definition
+                    // JPEG B.2.4.4
+                    panic!("got to restart interval def")
                 }
                 _ => {
                     println!("\n\nUnhandled byte marker: {:02x} {:02x}",
                              vec[i],
                              vec[i + 1]);
+                    println!("len={}", data_length);
                     print_vector(vec.iter().skip(i));
-                    panic!();
+                    break;
                 }
             }
             i += 4 + data_length;
         }
-
-
-
-
-        Ok(jfif_image)
+        panic!();
+        // Ok(jfif_image)
     }
 
     pub fn get_nth_square(&self, n: usize) -> &[u8] {
