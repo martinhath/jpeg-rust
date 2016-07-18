@@ -185,10 +185,33 @@ impl JFIFImage {
                     let data_length = end_spectral_section as usize;// - start_spectral_section + 1;
                     // Read `data_length`  values into `frequencies`
                     if let Some(ref ac_table) = jfif_image.huffman_ac_tables[ac_table_id as usize] {
+                        println!("data length = {}", data_length);
                         let (data, n) = ac_table.decode_n(data_length, &vec[i + 8..]);
                         println!("{:?}", data);
                         i += n;
                     }
+
+
+                    // NOTE S
+                    // Did we read DC or AC?
+                    // Should maybe get DLN segment (0xffdc), which we didn't do,
+                    // Could search for one, or see what we would get if not, so
+                    // we know how much data we're supposed to read.
+                    //
+                    // TODO s
+                    // should test decode_n (even though it was mostly copying)
+                    //  - good chance to comment up encode() as well.
+                    //
+                    let mut offset = i + 6;
+                    loop {
+                        if vec[offset] == 0xff && vec[offset + 1] == 0xd9 {
+                            break;
+                        }
+                        offset += 1;
+                    }
+                    print_vector(vec.iter().skip(offset));
+                    println!("0xff is at {}/{}", offset, vec.len());
+
 
                     i += data_length as usize;
                 }
@@ -208,7 +231,7 @@ impl JFIFImage {
             }
             i += 4 + data_length;
         }
-        panic!();
+        panic!("WHAT TO DO");
         // Ok(jfif_image)
     }
 
@@ -238,4 +261,38 @@ fn print_vector<I>(iter: I)
     if i % 16 != 0 || i == 0 {
         print!("\n");
     }
+}
+
+/// Turn a vector representing a Matrix into 'zigzag' order.
+///
+/// ```
+///  0  1  2  3
+///  4  5  6  7
+///  8  9 10 11
+/// 12 13 14 15
+///
+/// becomes
+///
+///  0  1  5  6
+///  2  4  7 12
+///  3  8 11 13
+///  9 10 14 15
+/// ```
+///
+fn zigzag<T>(vec: Vec<T>) -> Vec<T>
+    where T: Copy
+{
+    if vec.len() != 64 {
+        panic!("I took a shortcut in zigzag()! Please implement me properlt :)");
+    }
+    // hardcode dis shit lol
+    let indices = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48,
+                   41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22,
+                   15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55,
+                   62, 53];
+    let mut res = Vec::with_capacity(64);
+    for &i in indices.iter() {
+        res.push(vec[i]);
+    }
+    res
 }
