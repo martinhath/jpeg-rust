@@ -52,7 +52,8 @@ pub struct JFIFImage {
     dimensions: JPEGDimensions,
     thumbnail_dimensions: ThumbnailDimensions,
     comment: Option<String>,
-    huffman_tables: Vec<Option<huffman::Table>>,
+    huffman_ac_tables: [Option<huffman::Table>; 4],
+    huffman_dc_tables: [Option<huffman::Table>; 4],
 
     // tmp
     data_index: usize,
@@ -85,16 +86,13 @@ impl JFIFImage {
         // TODO: thumbnail data?
         // let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
 
-        let mut huffman_tables = Vec::with_capacity(16);
-        for _ in 0..16 {
-            huffman_tables.push(None);
-        }
         let mut jfif_image = JFIFImage {
             version: version,
             units: units,
             dimensions: (x_density, y_density),
             thumbnail_dimensions: thumbnail_dimensions,
-            huffman_tables: huffman_tables,
+            huffman_ac_tables: [None, None, None, None],
+            huffman_dc_tables: [None, None, None, None],
 
             comment: None,
 
@@ -141,6 +139,7 @@ impl JFIFImage {
                 (0xff, 0xc4) => {
                     // Define Huffman table
                     // JPEG B.2.4.2
+                    // DC = 0, AC = 1
                     let table_class = (vec[i + 4] & 0xf0) >> 4;
                     let table_dest_id = vec[i + 4] & 0x0f;
                     // println!("Huffman table: len: {}\tclass: {}\tdest_id: {}",
@@ -153,13 +152,22 @@ impl JFIFImage {
                     // Code i has value data_area[i]
                     let data_area: &[u8] = &vec[i + 5 + 16..i + 4 + data_length];
                     let huffman_table = huffman::Table::from_size_data_tables(size_area, data_area);
-                    jfif_image.huffman_tables.insert(table_dest_id as usize, Some(huffman_table));
+                    let ind = table_dest_id as usize;
+                    if table_class == 0 {
+                        jfif_image.huffman_dc_tables[ind] = Some(huffman_table);
+                    } else {
+                        jfif_image.huffman_ac_tables[ind] = Some(huffman_table);
+                    }
                 }
                 (0xff, 0xda) => {
                     // Start of Scan
                     // JPEG B.2.3
                     let num_components = vec[i + 4];
-
+                    if num_components != 1 {
+                        panic!("FIXME! I took the easy way!")
+                    }
+                    let dc_table_id = (vec[i + 6] & 0xf0) >> 4;
+                    let ac_table_id = vec[i + 6] & 0x0f;
                     i += 2 * num_components as usize;
                     let start_spectral_section = vec[i + 5];
                     let end_spectral_section = vec[i + 6];
@@ -174,11 +182,12 @@ impl JFIFImage {
                     // How long is the ECS?? Maybe it can be derived
                     // from values read in some headers.
                     // If we are not using `restart`, there is only one segment.
-                    let data_length = end_spectral_section - start_spectral_section + 1;
+                    let data_length = end_spectral_section as usize;// - start_spectral_section + 1;
                     // Read `data_length`  values into `frequencies`
-                    let mut frequencies = Vec::<u8>::with_capacity(data_length as usize);
-                    let mut index = 0;
-                    while index < data_length {
+                    if let Some(ref ac_table) = jfif_image.huffman_ac_tables[ac_table_id as usize] {
+                        let (data, n) = ac_table.decode_n(data_length, &vec[i + 8..]);
+                        println!("{:?}", data);
+                        i += n;
                     }
 
                     i += data_length as usize;
