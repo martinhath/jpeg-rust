@@ -146,4 +146,56 @@ impl Table {
         }
         result
     }
+
+    /// Decode n bytes from `data`. Return the decoded bytes, as well
+    /// as how many bytes from `data` was read.
+    pub fn decode_n(&self, num: usize, data: &[u8]) -> (Vec<u8>, usize) {
+        let mut result = Vec::<u8>::new();
+        let mut bytes_decoded = 0;
+
+        // Warning: mostly copied from decode().
+        let mut current = ((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
+                          ((data[3] as u32) << 8) |
+                          ((data[3] as u32) << 0);
+        // Index of next value to read
+        let mut index = 4;
+        // Number of bits shifted off current
+        let mut bits_read = 0;
+
+        'main: while index < data.len() {
+            while bits_read >= 8 {
+                current |= (data[index] as u32) << (bits_read - 8);
+                bits_read -= 8;
+                index += 1;
+            }
+            let current16 = ((current & 0xffff0000) >> 16) as u16;
+            for length in 2..16 {
+                let ref vec = self.code_vecs[length];
+
+                let mask = BIT_MASKS[length];
+                let code_candidate: u16 = (current16 & mask) >> (16 - length);
+
+                // Loop over all ids which are of `length` length.
+                for &id in vec.iter() {
+                    let idu = id as usize;
+                    let code = self.code_table[idu] as u16;
+                    if code == code_candidate {
+                        // success
+                        let value = data[idu];
+                        result.push(value);
+                        bytes_decoded += 1;
+                        if bytes_decoded == num {
+                            break 'main;
+                        }
+
+                        current <<= length;
+                        bits_read += length;
+                        continue 'main;
+                    }
+                }
+            }
+            panic!("failed to find code for current: {:016b}", current);
+        }
+        (result, index)
+    }
 }
