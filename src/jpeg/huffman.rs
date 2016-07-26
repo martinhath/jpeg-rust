@@ -105,7 +105,7 @@ impl Table {
         codes
     }
 }
-
+use std::cell::Cell;
 // TODO: Clean up this!
 pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
     // TODO: For now, assume there is at least four bytes to read.
@@ -120,17 +120,17 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
     let mut result = Vec::<u8>::new();
-    let mut current: u32 = ((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                           ((data[3] as u32) << 8) |
-                           ((data[3] as u32) << 0);
+    let mut current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
+                                           ((data[3] as u32) << 8) |
+                                           ((data[3] as u32) << 0));
     // Index of next value to read
-    let mut index = 4;
+    let mut index = Cell::new(4);
     // Number of bits shifted off current
-    let mut bits_read: usize = 0;
+    let mut bits_read: Cell<usize> = Cell::new(0);
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
-        let current16 = ((current & 0xffff0000) >> 16) as u16;
+        let current16 = ((current.get() & 0xffff0000) >> 16) as u16;
         // Check all code lengths, and try to find
         // a code that is the `length` upper bits of `current`.
         for length in 2..16 {
@@ -143,18 +143,18 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
                 code == code_candidate
             }) {
                 // Shift out the bits we just read
-                current <<= length;
-                bits_read += length;
+                current.set(current.get() << length);
+                bits_read.set(bits_read.get() + length);
                 // Maybe shift in new bits from `data`
-                while bits_read >= 8 {
-                    current |= (data[index] as u32) << (bits_read - 8);
-                    bits_read -= 8;
-                    index += 1;
+                while bits_read.get() >= 8 {
+                    current.set(current.get() | (data[index.get()] as u32) << (bits_read.get() - 8));
+                    bits_read.set(bits_read.get() - 8);
+                    index.set(index.get() + 1);
                 }
                 return code_candidate;
             }
         }
-        panic!("failed to find code for current: {:016b}", current);
+        panic!("failed to find code for current: {:016b}", current.get());
     };
     let read_n_bits = |n: u8| -> u32 {
         // TODO: implement properly
@@ -164,13 +164,13 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
             // in additonal numbers from `data` as well.
         }
         let mask = BIT_MASKS[n as usize] as u32;
-        let number: u32 = ((current & mask) >> (32 - n));
-        current <<= n;
-        bits_read += n as usize;
-        while bits_read >= 8 {
-            current |= (data[index] as u32) << (bits_read - 8);
-            bits_read -= 8;
-            index += 1;
+        let number: u32 = ((current.get() & mask) >> (32 - n));
+        current.set(current.get() << n);
+        bits_read.set(bits_read.get() + n as usize);
+        while bits_read.get() >= 8 {
+            current.set(current.get() | (data[index.get()] as u32) << (bits_read.get() - 8));
+            bits_read.set(bits_read.get() - 8);
+            index.set(index.get() + 1);
         }
         number
     };
