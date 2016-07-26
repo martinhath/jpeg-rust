@@ -1,3 +1,5 @@
+use std::iter::repeat;
+
 // Selects i bits, from msb to lsb.
 const BIT_MASKS: [u16; 17] = [0x0, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00,
                               0xFF80, 0xFFC0, 0xFFE0, 0xFFF0, 0xFFF8, 0xFFFC, 0xFFFE, 0xFFFF];
@@ -107,7 +109,7 @@ impl Table {
 }
 use std::cell::Cell;
 // TODO: Clean up this!
-pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
+pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
     // TODO: For now, assume there is at least four bytes to read.
 
     // Stagety: `current` holds data from the data slice. The next data
@@ -117,9 +119,11 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
     // it properly. This way, there will always be at least 25 readable
     // bits in `current`, on each new call to `get_next_code`.
     //
+    // Return i16s, as coefficients before DCT may be large.
+    //
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
-    let mut result = Vec::<u8>::new();
+    let mut result = Vec::<i16>::new();
     let mut current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
                                            ((data[3] as u32) << 8) |
                                            ((data[3] as u32) << 0));
@@ -163,8 +167,9 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
             // If this is fixed, it is possible that we need to shift
             // in additonal numbers from `data` as well.
         }
+        let current16 = current.get() >> 16;
         let mask = BIT_MASKS[n as usize] as u32;
-        let number: u32 = ((current.get() & mask) >> (32 - n));
+        let number: u32 = ((current16 & mask) >> (16 - n));
         current.set(current.get() << n);
         bits_read.set(bits_read.get() + n as usize);
         while bits_read.get() >= 8 {
@@ -179,9 +184,41 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<u8> {
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
 
+    result.push(dc_cof);
+
+    let mut n_pushed = 1;
+
+    while n_pushed < 64 {
+        let next_code = get_next_code(&ac_table);
+        if next_code == 0 {
+            result.extend(repeat(0).take(64 - n_pushed));
+            break;
+        }
+        let (zeroes, num) = byte_to_pair(next_code);
+        println!("got ({}, {})", zeroes, num);
+        for _ in 0..zeroes {
+            result.push(0)
+        }
+        result.push(num as i16);
+        n_pushed += (zeroes as usize) + 1;
+    }
+
     result
 }
 
+fn byte_to_pair(byte: u8) -> (u8, u8) {
+    ((byte & 0xf0) >> 4, byte & 0x0f)
+}
+
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
-    123
+    if len == 0 {
+        return 0;
+    }
+    let bits = bits as i16;
+    let base: i16 = (1 << (len - 1));
+    if bits < base {
+        -2 * base + 1 + bits
+    } else {
+        bits as i16
+    }
 }

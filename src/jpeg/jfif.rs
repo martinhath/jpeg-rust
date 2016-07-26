@@ -124,8 +124,8 @@ impl JFIFImage {
                     // Quantization tables
                     // JPEG B.2.4.1
 
-                    let p_q = (vec[i + 4] & 0xf0) >> 4;
-                    let t_q = vec[i + 4] & 0x0f;
+                    let precision = (vec[i + 4] & 0xf0) >> 4;
+                    let identifier = vec[i + 4] & 0x0f;
                     let quant_values = &vec[i + 5..i + 4 + data_length];
 
                     // Do whatever
@@ -186,37 +186,20 @@ impl JFIFImage {
                     let data_length = end_spectral_section as usize;
                     // Read `data_length`  values into `frequencies`
 
-                    // if let Some(ref ac_table) = jfif_image.huffman_ac_tables[ac_table_id as usize] {
-                    //     let data = ac_table.decode(&vec[i + 8..]);
-                    //     let n = data.len();
-                    //     println!("got from huffman: ");
-                    //     println!("{:?}", data);
-                    //     println!("{:?}", n);
-                    //     let data = zigzag(data.iter().take(64).collect());
-                    //     println!("{:?}", data);
-                    //     i += n;
-                    // }
+                    i += 8;
+                    let ac_table = jfif_image.huffman_ac_tables[ac_table_id as usize]
+                        .as_ref()
+                        .expect("Did not find AC table");
 
+                    let dc_table = jfif_image.huffman_dc_tables[dc_table_id as usize]
+                        .as_ref()
+                        .expect("Did not find DC table");
 
-                    // NOTE S
-                    // Did we read DC or AC?
-                    // Should maybe get DLN segment (0xffdc), which we didn't do,
-                    // Could search for one, or see what we would get if not, so
-                    // we know how much data we're supposed to read.
-                    //
-                    // TODO s
-                    // should test decode_n (even though it was mostly copying)
-                    //  - good chance to comment up encode() as well.
-                    //
-                    let mut offset = i + 6;
-                    loop {
-                        if vec[offset] == 0xff && vec[offset + 1] == 0xd9 {
-                            break;
-                        }
-                        offset += 1;
+                    let decoded = huffman::decode(ac_table, dc_table, &vec[i..]);
+                    if decoded.len() != 64 {
+                        panic!("length should be 64!!")
                     }
-                    print_vector(vec.iter().skip(offset));
-                    println!("0xff is at {}/{}", offset, vec.len());
+
 
 
                     i += data_length as usize;
