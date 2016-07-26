@@ -162,6 +162,7 @@ impl JFIFImage {
                 (0xff, 0xda) => {
                     // Start of Scan
                     // JPEG B.2.3
+                    println!("start of scan, length = {}", data_length);
                     let num_components = vec[i + 4];
                     if num_components != 1 {
                         panic!("FIXME! I took the easy way!")
@@ -169,27 +170,32 @@ impl JFIFImage {
                     let dc_table_id = (vec[i + 6] & 0xf0) >> 4;
                     let ac_table_id = vec[i + 6] & 0x0f;
                     i += 2 * num_components as usize;
+
                     let start_spectral_section = vec[i + 5];
                     let end_spectral_section = vec[i + 6];
                     let al_ah = vec[i + 7];
 
-                    println!("start spectral section={}", start_spectral_section);
-                    println!("end spectral section={}", end_spectral_section);
+                    // println!("start spectral section={}", start_spectral_section);
+                    // println!("end spectral section={}", end_spectral_section);
 
                     // After the scan header is parsed, we start to read data.
                     // See Figure B.2 in B.2.1
-                    print_vector(vec.iter().skip(i + 8));
-                    // How long is the ECS?? Maybe it can be derived
-                    // from values read in some headers.
-                    // If we are not using `restart`, there is only one segment.
-                    let data_length = end_spectral_section as usize;// - start_spectral_section + 1;
+
+                    // print_vector(vec.iter().skip(i + 8));
+
+                    let data_length = end_spectral_section as usize;
                     // Read `data_length`  values into `frequencies`
-                    if let Some(ref ac_table) = jfif_image.huffman_ac_tables[ac_table_id as usize] {
-                        println!("data length = {}", data_length);
-                        let (data, n) = ac_table.decode_n(data_length, &vec[i + 8..]);
-                        println!("{:?}", data);
-                        i += n;
-                    }
+
+                    // if let Some(ref ac_table) = jfif_image.huffman_ac_tables[ac_table_id as usize] {
+                    //     let data = ac_table.decode(&vec[i + 8..]);
+                    //     let n = data.len();
+                    //     println!("got from huffman: ");
+                    //     println!("{:?}", data);
+                    //     println!("{:?}", n);
+                    //     let data = zigzag(data.iter().take(64).collect());
+                    //     println!("{:?}", data);
+                    //     i += n;
+                    // }
 
 
                     // NOTE S
@@ -283,7 +289,8 @@ fn zigzag<T>(vec: Vec<T>) -> Vec<T>
     where T: Copy
 {
     if vec.len() != 64 {
-        panic!("I took a shortcut in zigzag()! Please implement me properlt :)");
+        panic!("I took a shortcut in zigzag()! Please implement me properly :) (len={})",
+               vec.len());
     }
     // hardcode dis shit lol
     let indices = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48,
