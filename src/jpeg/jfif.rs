@@ -284,7 +284,7 @@ impl JFIFImage {
 
                     let mut raw_image_blocks = Vec::<Vec<i16>>::new();
                     for block_i in 0..num_blocks {
-                        println!("decode block {} (i={})", block_i, i);
+                        // println!("decode block {} (i={})", block_i, i);
                         let (decoded, bytes_read) = huffman::decode(ac_table, dc_table, &vec[i..]);
                         if decoded.len() != 64 {
                             panic!("length should be 64!!")

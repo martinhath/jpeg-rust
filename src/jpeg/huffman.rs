@@ -47,7 +47,7 @@ impl Table {
                                             Vec::new(), Vec::new(), Vec::new(), Vec::new(),
                                             Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         for i in 1..16 {
-            let ref mut vec = code_vecs[i];
+            let ref mut vec = code_vecs[i - 1];
             for j in 0..size_table.len() {
                 if size_table[j] == i as u8 {
                     vec.push(j as u8);
@@ -111,6 +111,20 @@ impl Table {
         }
         codes
     }
+
+    pub fn print_table(&self) {
+        for (i, ref vec) in self.code_vecs.iter().enumerate() {
+            let len = i + 1;
+            for &id in vec.iter() {
+                let code = self.code_table[id as usize];
+                let code_string = format!("{:01$b}", code, len);
+                println!("#{:3}\t{:3}\t{:>16}",
+                         id,
+                         self.data_table[id as usize],
+                         code_string);
+            }
+        }
+    }
 }
 
 use std::cell::Cell;
@@ -142,14 +156,30 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
-        let current16 = ((current.get() & 0xffff0000) >> 16) as u16;
+        let mut current16 = ((current.get() & 0xffff0000) >> 16) as u16;
+
+        if current16 & 0xff00 == 0xff00 {
+            let marker = current16 & 0x00ff;
+            println!("Found marker 0xff{:02x} ({})", marker, bits_read.get());
+            let length = 8;
+            current.set(current.get() << length);
+            bits_read.set(bits_read.get() + length);
+            // Maybe shift in new bits from `data`
+            while bits_read.get() >= 8 {
+                current.set(current.get() |
+                            (data[index.get() + 4] as u32) << (bits_read.get() - 8));
+                bits_read.set(bits_read.get() - 8);
+                index.set(index.get() + 1);
+            }
+            current16 = ((current.get() & 0xffff0000) >> 16) as u16;
+        }
         // Check all code lengths, and try to find
         // a code that is the `length` upper bits of `current`.
         for length in 1..17 {
             let mask = BIT_MASKS[length];
             let code_candidate: u16 = ((current16 & mask) >> (16 - length)) as u16;
 
-            for &id in table.code_vecs[length].iter() {
+            for &id in table.code_vecs[length - 1].iter() {
                 let idu = id as usize;
                 let code = table.code_table[idu];
                 if code == code_candidate {
