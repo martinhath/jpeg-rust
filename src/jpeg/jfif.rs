@@ -62,6 +62,7 @@ pub struct JFIFImage {
     raw_data: Vec<u8>, // TOOD: add all options, such as progressive/sequential, etc.
 }
 
+#[derive(Debug)]
 struct FrameHeader {
     sample_precision: u8,
     num_lines: u16,
@@ -70,6 +71,13 @@ struct FrameHeader {
     frame_components: Vec<FrameComponentHeader>,
 }
 
+impl FrameHeader {
+    fn component_header(&self, id: u8) -> Option<&FrameComponentHeader> {
+        self.frame_components.iter().find(|c| c.component_id == id)
+    }
+}
+
+#[derive(Debug)]
 struct FrameComponentHeader {
     component_id: u8,
     horizontal_sampling_factor: u8,
@@ -160,7 +168,6 @@ impl JFIFImage {
                     let num_lines = u8s_to_u16(&vec[i + 5..]);
                     let samples_per_line = u8s_to_u16(&vec[i + 7..]);
                     let image_components = vec[i + 9];
-                    println!("image_components = {}", image_components);
                     if image_components != 1 {
                         panic!("FIXME! 'Baseline DCT");
                     }
@@ -169,7 +176,7 @@ impl JFIFImage {
                     let vertical_sampling_factor = vec[i + 11] & 0x0f;
                     let quantization_selector = vec[i + 12];
 
-                    let frame_component = FrameComponent {
+                    let frame_component = FrameComponentHeader {
                         component_id: component_id,
                         horizontal_sampling_factor: horizontal_sampling_factor,
                         vertical_sampling_factor: vertical_sampling_factor,
@@ -182,6 +189,7 @@ impl JFIFImage {
                         image_components: image_components,
                         frame_components: vec![frame_component],
                     };
+                    jfif_image.frame_header = Some(frame_header)
                 }
                 (0xff, 0xc4) => {
                     // Define Huffman table
@@ -189,10 +197,6 @@ impl JFIFImage {
                     // DC = 0, AC = 1
                     let table_class = (vec[i + 4] & 0xf0) >> 4;
                     let table_dest_id = vec[i + 4] & 0x0f;
-                    // println!("Huffman table: len: {}\tclass: {}\tdest_id: {}",
-                    //          data_length,
-                    //          table_class,
-                    //          table_dest_id);
 
                     // There are size_area[i] number of codes of length i + 1.
                     let size_area: &[u8] = &vec[i + 5..i + 5 + 16];
@@ -209,11 +213,11 @@ impl JFIFImage {
                 (0xff, 0xda) => {
                     // Start of Scan
                     // JPEG B.2.3
-                    println!("start of scan, length = {}", data_length);
                     let num_components = vec[i + 4];
                     if num_components != 1 {
                         panic!("FIXME! I took the easy way!")
                     }
+                    let scan_component_selector = vec[i + 5];
                     let dc_table_id = (vec[i + 6] & 0xf0) >> 4;
                     let ac_table_id = vec[i + 6] & 0x0f;
                     i += 2 * num_components as usize;
@@ -239,6 +243,37 @@ impl JFIFImage {
                     if decoded.len() != 64 {
                         panic!("length should be 64!!")
                     }
+                    print_vector_dec(decoded.iter());
+
+                    // TODO: Should find a better way of doing this,
+                    //       as either `None` is a bad error, from which
+                    //       recovery is not an option?
+                    let quant_table_id = match jfif_image.frame_header {
+                        Some(ref frame_header) => {
+                            match frame_header.component_header(scan_component_selector) {
+                                Some(frame_component_header) => {
+                                    frame_component_header.quantization_selector
+                                }
+                                None => {
+                                    panic!(format!("Could not find frame component for \
+                                                     scan_component_selector {}",
+                                                   scan_component_selector))
+                                }
+                            }
+                        }
+                        None => panic!("jfif_image has no frame_header!"),
+                    };
+
+                    let ref quant_table = jfif_image.quantization_tables[quant_table_id as usize]
+                        .as_ref()
+                        .expect(&format!("Did not find quantization table of id {}",
+                                         quant_table_id));
+                    let dequantized: Vec<i16> = quant_table.iter()
+                        .zip(decoded.iter())
+                        .map(|(&q, &n)| (q as i16) * (n as i16))
+                        .collect();
+
+                    print_vector_dec(dequantized.iter());
 
 
 
@@ -290,6 +325,23 @@ fn print_vector<I>(iter: I)
         }
     }
     if i % 16 != 0 || i == 0 {
+        print!("\n");
+    }
+}
+use std::fmt::Display;
+fn print_vector_dec<I>(iter: I)
+    where I: Iterator,
+          I::Item: Display
+{
+    let mut i = 0;
+    for byte in iter.take(64) {
+        i += 1;
+        print!("{:3} ", byte);
+        if i % 8 == 0 && i != 0 {
+            print!("\n");
+        }
+    }
+    if i % 8 != 0 || i == 0 {
         print!("\n");
     }
 }
