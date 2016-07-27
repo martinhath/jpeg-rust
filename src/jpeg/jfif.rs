@@ -1,4 +1,5 @@
 use jpeg::huffman;
+use ::transform;
 
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
@@ -276,6 +277,11 @@ impl JFIFImage {
                     print_vector_dec(dequantized.iter());
 
 
+                    let dequantized_f32 = dequantized.iter().map(|&i| i as f32).collect();
+                    let spatial = transform::discrete_cosine_transform_inverse(&dequantized_f32);
+                    // TODO: u8 is probably not what we want?
+                    let rounded_and_shifted = spatial.iter().map(|&f| (f.round() + 128f32) as u8);
+                    print_vector_dec(rounded_and_shifted);
 
 
 
@@ -299,14 +305,6 @@ impl JFIFImage {
         }
         panic!("WHAT TO DO");
         // Ok(jfif_image)
-    }
-
-    pub fn get_nth_square(&self, n: usize) -> &[u8] {
-        // let square_size = self.dimensions.0 as usize * self.dimensions.1 as usize;
-        let square_size = 8 * 8;
-        let a = self.data_index + square_size * n;
-        let b = a + square_size;
-        &self.raw_data[a..b]
     }
 }
 

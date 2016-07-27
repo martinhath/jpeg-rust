@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 fn usize_square(n: usize) -> Option<usize> {
     let mut a = 1;
     while a * a < n {
-
+        a += 1;
     }
     if a * a == n {
         Some(a)

@@ -194,7 +194,8 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
             result.extend(repeat(0).take(64 - n_pushed));
             break;
         }
-        let (zeroes, num) = byte_to_pair(next_code);
+        let zeroes = (next_code & 0xf0) >> 4;
+        let num = next_code & 0x0f;
         println!("got ({}, {})", zeroes, num);
         for _ in 0..zeroes {
             result.push(0)
@@ -204,10 +205,6 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
     }
 
     result
-}
-
-fn byte_to_pair(byte: u8) -> (u8, u8) {
-    ((byte & 0xf0) >> 4, byte & 0x0f)
 }
 
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
