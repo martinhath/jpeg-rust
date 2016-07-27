@@ -109,7 +109,7 @@ impl Table {
 }
 use std::cell::Cell;
 // TODO: Clean up this!
-pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
+pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usize) {
     // TODO: For now, assume there is at least four bytes to read.
 
     // Stagety: `current` holds data from the data slice. The next data
@@ -120,6 +120,8 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
     // bits in `current`, on each new call to `get_next_code`.
     //
     // Return i16s, as coefficients before DCT may be large.
+    // Also return the number of read elements from `data`, so the
+    // caller know how far ahead to skip.
     //
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
@@ -182,7 +184,7 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
 
     let dc_value_len = get_next_code(&dc_table);
     let dc_value = read_n_bits(dc_value_len);
-    let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
+    let mut dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
 
     result.push(dc_cof);
 
@@ -196,18 +198,23 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
         }
         let zeroes = (next_code & 0xf0) >> 4;
         let num = next_code & 0x0f;
-        println!("got ({}, {})", zeroes, num);
         for _ in 0..zeroes {
             result.push(0)
         }
         result.push(num as i16);
         n_pushed += (zeroes as usize) + 1;
     }
+    let mut data_number_read = index.get() - 4;
+    if bits_read.get() > 0 {
+        data_number_read += 1;
+    }
 
-    result
+    (result, data_number_read)
 }
 
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
+    // TODO: find out where this is in the standard.
+    println!("dc_value_from_len_bits len={}", len);
     if len == 0 {
         return 0;
     }

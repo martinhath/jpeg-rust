@@ -226,12 +226,17 @@ impl JFIFImage {
                     let start_spectral_section = vec[i + 5];
                     let end_spectral_section = vec[i + 6];
                     let al_ah = vec[i + 7];
+                    // `i` is now at the head of the data.
+                    i += 8;
 
                     // After the scan header is parsed, we start to read data.
                     // See Figure B.2 in B.2.1
+                    //
+                    // But first, we get all the tables.
+                    // NOTE: this assumes no restart!
+                    //       Check if it is handled: `(0xff, 0xdd)`
 
-                    let data_length = end_spectral_section as usize;
-                    i += 8;
+
                     let ac_table = jfif_image.huffman_ac_tables[ac_table_id as usize]
                         .as_ref()
                         .expect("Did not find AC table");
@@ -239,12 +244,6 @@ impl JFIFImage {
                     let dc_table = jfif_image.huffman_dc_tables[dc_table_id as usize]
                         .as_ref()
                         .expect("Did not find DC table");
-
-                    let decoded = huffman::decode(ac_table, dc_table, &vec[i..]);
-                    if decoded.len() != 64 {
-                        panic!("length should be 64!!")
-                    }
-                    print_vector_dec(decoded.iter());
 
                     // TODO: Should find a better way of doing this,
                     //       as either `None` is a bad error, from which
@@ -269,27 +268,42 @@ impl JFIFImage {
                         .as_ref()
                         .expect(&format!("Did not find quantization table of id {}",
                                          quant_table_id));
-                    let dequantized: Vec<i16> = quant_table.iter()
-                        .zip(decoded.iter())
-                        .map(|(&q, &n)| (q as i16) * (n as i16))
-                        .collect();
-
-                    print_vector_dec(dequantized.iter());
 
 
-                    let dequantized_f32 = dequantized.iter().map(|&i| i as f32).collect();
-                    let spatial = transform::discrete_cosine_transform_inverse(&dequantized_f32);
-                    // TODO: u8 is probably not what we want?
-                    let rounded_and_shifted = spatial.iter().map(|&f| (f.round() + 128f32) as u8);
-                    print_vector_dec(rounded_and_shifted);
+                    let mut image_blocks = Vec::<Vec<u8>>::new();
+                    let n_blocks_x = (jfif_image.dimensions.0 + 7) / 8; // round up
+                    let n_blocks_y = (jfif_image.dimensions.1 + 7) / 8; // round up
+                    for _ in 0..(n_blocks_x * n_blocks_y) {
+                        let (decoded, num_read) = huffman::decode(ac_table, dc_table, &vec[i..]);
+                        if decoded.len() != 64 {
+                            panic!("length should be 64!!")
+                        }
 
+                        let dequantized: Vec<i16> = quant_table.iter()
+                            .zip(decoded.iter())
+                            .map(|n| {
+                                println!("{:?}", n);
+                                n
+                            })
+                            .map(|(&q, &n)| (q as i16) * n)
+                            .collect();
 
+                        let dequantized_f32 = dequantized.iter().map(|&i| i as f32).collect();
+                        let spatial =
+                            transform::discrete_cosine_transform_inverse(&dequantized_f32);
+                        // TODO: u8 is probably not what we want?
+                        let rounded_and_shifted = spatial.iter()
+                            .map(|&f| (f.round() + 128f32) as u8);
 
-                    i += data_length as usize;
+                        image_blocks.push(rounded_and_shifted.collect());
+
+                        i += num_read as usize;
+                    }
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
                     // JPEG B.2.4.4
+                    // TODO: support this
                     panic!("got to restart interval def")
                 }
                 _ => {
