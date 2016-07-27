@@ -124,13 +124,13 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
     let mut result = Vec::<i16>::new();
-    let mut current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                                           ((data[3] as u32) << 8) |
-                                           ((data[3] as u32) << 0));
+    let current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
+                                       ((data[3] as u32) << 8) |
+                                       ((data[3] as u32) << 0));
     // Index of next value to read
-    let mut index = Cell::new(4);
+    let index = Cell::new(4);
     // Number of bits shifted off current
-    let mut bits_read: Cell<usize> = Cell::new(0);
+    let bits_read: Cell<usize> = Cell::new(0);
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
@@ -169,7 +169,7 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> Vec<i16> {
         }
         let current16 = current.get() >> 16;
         let mask = BIT_MASKS[n as usize] as u32;
-        let number: u32 = ((current16 & mask) >> (16 - n));
+        let number: u32 = (current16 & mask) >> (16 - n);
         current.set(current.get() << n);
         bits_read.set(bits_read.get() + n as usize);
         while bits_read.get() >= 8 {
@@ -215,7 +215,7 @@ fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
         return 0;
     }
     let bits = bits as i16;
-    let base: i16 = (1 << (len - 1));
+    let base: i16 = 1 << (len - 1);
     if bits < base {
         -2 * base + 1 + bits
     } else {

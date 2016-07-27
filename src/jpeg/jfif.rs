@@ -1,5 +1,4 @@
 use jpeg::huffman;
-use std::iter;
 
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
@@ -54,10 +53,28 @@ pub struct JFIFImage {
     comment: Option<String>,
     huffman_ac_tables: [Option<huffman::Table>; 4],
     huffman_dc_tables: [Option<huffman::Table>; 4],
+    quantization_tables: [Option<Vec<u8>>; 4],
+    // TODO: multiple frames ?
+    frame_header: Option<FrameHeader>,
 
     // tmp
     data_index: usize,
     raw_data: Vec<u8>, // TOOD: add all options, such as progressive/sequential, etc.
+}
+
+struct FrameHeader {
+    sample_precision: u8,
+    num_lines: u16,
+    samples_per_line: u16,
+    image_components: u8,
+    frame_components: Vec<FrameComponentHeader>,
+}
+
+struct FrameComponentHeader {
+    component_id: u8,
+    horizontal_sampling_factor: u8,
+    vertical_sampling_factor: u8,
+    quantization_selector: u8,
 }
 
 #[allow(unused_variables)]
@@ -91,10 +108,11 @@ impl JFIFImage {
             units: units,
             dimensions: (x_density, y_density),
             thumbnail_dimensions: thumbnail_dimensions,
+            comment: None,
             huffman_ac_tables: [None, None, None, None],
             huffman_dc_tables: [None, None, None, None],
-
-            comment: None,
+            quantization_tables: [None, None, None, None],
+            frame_header: None,
 
             data_index: 0,
             raw_data: Vec::new(),
@@ -127,14 +145,43 @@ impl JFIFImage {
                     let precision = (vec[i + 4] & 0xf0) >> 4;
                     let identifier = vec[i + 4] & 0x0f;
                     let quant_values = &vec[i + 5..i + 4 + data_length];
-
-                    // Do whatever
+                    // TODO: we probably dont need to copy and collect here.
+                    // Would rather have a slice in quant_tables, with a
+                    // lifetime the same as jfif_image (?)
+                    let table = quant_values.iter()
+                        .map(|u| *u)
+                        .collect();
+                    jfif_image.quantization_tables[identifier as usize] = Some(table);
                 }
                 (0xff, 0xc0) => {
                     // Baseline DCT
                     // JPEG B.2.2
+                    let sample_precision = vec[i + 4];
+                    let num_lines = u8s_to_u16(&vec[i + 5..]);
+                    let samples_per_line = u8s_to_u16(&vec[i + 7..]);
+                    let image_components = vec[i + 9];
+                    println!("image_components = {}", image_components);
+                    if image_components != 1 {
+                        panic!("FIXME! 'Baseline DCT");
+                    }
+                    let component_id = vec[i + 10];
+                    let horizontal_sampling_factor = (vec[i + 11] & 0xf0) >> 4;
+                    let vertical_sampling_factor = vec[i + 11] & 0x0f;
+                    let quantization_selector = vec[i + 12];
 
-                    // TODO: Make use of this
+                    let frame_component = FrameComponent {
+                        component_id: component_id,
+                        horizontal_sampling_factor: horizontal_sampling_factor,
+                        vertical_sampling_factor: vertical_sampling_factor,
+                        quantization_selector: quantization_selector,
+                    };
+                    let frame_header = FrameHeader {
+                        sample_precision: sample_precision,
+                        num_lines: num_lines,
+                        samples_per_line: samples_per_line,
+                        image_components: image_components,
+                        frame_components: vec![frame_component],
+                    };
                 }
                 (0xff, 0xc4) => {
                     // Define Huffman table
@@ -175,17 +222,10 @@ impl JFIFImage {
                     let end_spectral_section = vec[i + 6];
                     let al_ah = vec[i + 7];
 
-                    // println!("start spectral section={}", start_spectral_section);
-                    // println!("end spectral section={}", end_spectral_section);
-
                     // After the scan header is parsed, we start to read data.
                     // See Figure B.2 in B.2.1
 
-                    // print_vector(vec.iter().skip(i + 8));
-
                     let data_length = end_spectral_section as usize;
-                    // Read `data_length`  values into `frequencies`
-
                     i += 8;
                     let ac_table = jfif_image.huffman_ac_tables[ac_table_id as usize]
                         .as_ref()
@@ -199,6 +239,8 @@ impl JFIFImage {
                     if decoded.len() != 64 {
                         panic!("length should be 64!!")
                     }
+
+
 
 
 
