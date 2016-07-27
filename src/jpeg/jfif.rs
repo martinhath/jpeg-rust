@@ -227,9 +227,9 @@ impl JFIFImage {
                     // Read tables untill the segment is done
 
                     while huffman_index < target_index {
-                        println!("starting huffman read when huffman={} target={}",
-                                 huffman_index,
-                                 target_index);
+                        // println!("starting huffman read when huffman={} target={}",
+                        //          huffman_index,
+                        //          target_index);
                         let table_class = (vec[huffman_index] & 0xf0) >> 4;
                         let table_dest_id = vec[huffman_index] & 0x0f;
                         huffman_index += 1;
@@ -237,7 +237,6 @@ impl JFIFImage {
                         // There are `size_area[i]` number of codes of length `i + 1`.
                         let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
                         let number_of_codes = size_area.iter().fold(0u8, |a, b| a + *b) as usize;
-                        println!("number of codes: {}", number_of_codes);
 
                         huffman_index += 16;
                         // Code `i` has value `data_area[i]`
@@ -246,8 +245,8 @@ impl JFIFImage {
 
                         let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                   data_area);
-                        println!("Huffman table: id={}, class={}", table_dest_id, table_class);
-                        huffman_table.print_table();
+                        // println!("Huffman table: id={}, class={}", table_dest_id, table_class);
+                        // huffman_table.print_table();
                         if table_class == 0 {
                             jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                 Some(huffman_table);
@@ -256,7 +255,7 @@ impl JFIFImage {
                                 Some(huffman_table);
                         }
                     }
-                    println!("end with huffman={} target={}", huffman_index, target_index);
+                    // println!("end with huffman={} target={}", huffman_index, target_index);
                 }
                 (0xff, 0xda) => {
                     println!("start of scan");
@@ -292,6 +291,21 @@ impl JFIFImage {
                     // NOTE: this assumes no restart!
                     //       Check if it is handled: `(0xff, 0xdd)`
 
+
+
+                    // Should have switched component !
+                    // Stragegy (?) either loop over num blocks out here,
+                    // and loop each component, and read one block (sounds _slow),
+                    // or preprocess the tables in a vector, so that getting the tables
+                    // are simple. Then, loop
+                    //
+                    //     for _ in 0..x*y {
+                    //         for c in 0..n_compo {
+                    //             get_tables;
+                    //             read_block
+                    //         }
+                    //     }
+                    //
 
 
                     let ref scan_component_header = scan_header.scan_components[0];
@@ -336,19 +350,28 @@ impl JFIFImage {
 
 
                     let n_blocks_x = 1;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let n_blocks_y = 1;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let n_blocks_y = 2;//(jfif_image.dimensions.1 + 7) / 8; // round up
                     let num_blocks = n_blocks_x * n_blocks_y * scan_header.num_components;
                     println!("decode {} blocks", num_blocks);
 
+                    let mut scan_state = huffman::ScanState {
+                        index: 0,
+                        bits_read: 0,
+                    };
                     let mut raw_image_blocks = Vec::<Vec<i16>>::new();
                     for block_i in 0..num_blocks {
-                        // println!("decode block {} (i={})", block_i, i);
-                        let (decoded, bytes_read) = huffman::decode(ac_table, dc_table, &vec[i..]);
+
+                        println!("decode block {} (i={})", block_i, i);
+                        println!("{:?}", scan_state);
+                        print_vector_bin(vec.iter().skip(i + scan_state.index));
+
+                        let decoded =
+                            huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
                         if decoded.len() != 64 {
                             panic!("length should be 64!!")
                         }
                         raw_image_blocks.push(decoded);
-                        i += bytes_read;
+                        // i += scan_state.bits_read;
                     }
 
                     // Fix up DC coefficients - each num is encoded as the diff
@@ -435,6 +458,25 @@ fn print_vector<I>(iter: I)
         print!("\n");
     }
 }
+
+use std::fmt::Binary;
+fn print_vector_bin<I>(iter: I)
+    where I: Iterator,
+          I::Item: Binary
+{
+    let mut i = 0;
+    for byte in iter.take(8) {
+        i += 1;
+        print!("{:08b} ", byte);
+        if i % 8 == 0 && i != 0 {
+            print!("\n");
+        }
+    }
+    if i % 8 != 0 || i == 0 {
+        print!("\n");
+    }
+}
+
 use std::fmt::Display;
 fn print_vector_dec<I>(iter: I)
     where I: Iterator,

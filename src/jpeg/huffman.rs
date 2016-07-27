@@ -130,9 +130,19 @@ impl Table {
     }
 }
 
+#[derive(Debug)]
+pub struct ScanState {
+    pub index: usize,
+    pub bits_read: usize,
+}
+
 use std::cell::Cell;
 // TODO: Clean up this!
-pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usize) {
+pub fn decode(ac_table: &Table,
+              dc_table: &Table,
+              data: &[u8],
+              scan_state: &mut ScanState)
+              -> Vec<i16> {
     // TODO: For now, assume there is at least four bytes to read.
 
     // Stagety: `current` holds data from the data slice. The next data
@@ -147,36 +157,46 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
     // caller know how far ahead to skip.
     //
     // TODO: what if `data` is empty, and we have the bits we need to
-    //       finish in `current`?
+    //       finish in `current`? Probably not a problem, even though
+    //       we will have non scan data in `current`.
     let last_index = data.len();
-    let current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                                       ((data[3] as u32) << 8) |
-                                       ((data[3] as u32) << 0));
+
+    // Need to check data[0-4] for 0xff bytes.
+    // TODO: do this smarter!
+    let bytes_read_from_start;
+    let current: Cell<u32> = Cell::new({
+        let mut curr: u32 = 0;
+        let mut i = scan_state.index;
+        for it in 0..4 {
+            let shift_length = 24 - it * 8;
+            let num = data[i];
+            // If we find 0xff 0x00 0x??, make it 0xff 0x??
+            if data[i] == 0xff {
+                if data[i + 1] != 0x00 {
+                    panic!("Did not handle this case!");
+                }
+                i += 1;
+            }
+
+            i += 1;
+            curr |= (num as u32) << shift_length;
+        }
+        bytes_read_from_start = i;
+        curr
+    });
 
     // Number of bits shifted off current
-    let bits_read = Cell::new(0);
+    let bits_read = Cell::new(scan_state.index);
     // Index of next value to read
-    let index = Cell::new(4);
+    let index = Cell::new(scan_state.index + bytes_read_from_start);
+
+    if scan_state.bits_read > 0 {
+        current.set(current.get() << scan_state.bits_read);
+    }
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
         let mut current16 = ((current.get() & 0xffff0000) >> 16) as u16;
-
-        if current16 & 0xff00 == 0xff00 {
-            let marker = current16 & 0x00ff;
-            println!("Found marker 0xff{:02x} ({})", marker, bits_read.get());
-            let length = 8;
-            current.set(current.get() << length);
-            bits_read.set(bits_read.get() + length);
-            // Maybe shift in new bits from `data`
-            while bits_read.get() >= 8 {
-                current.set(current.get() |
-                            (data[index.get() + 4] as u32) << (bits_read.get() - 8));
-                bits_read.set(bits_read.get() - 8);
-                index.set(index.get() + 1);
-            }
-            current16 = ((current.get() & 0xffff0000) >> 16) as u16;
-        }
         // Check all code lengths, and try to find
         // a code that is the `length` upper bits of `current`.
         for length in 1..17 {
@@ -193,11 +213,21 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
                     bits_read.set(bits_read.get() + length);
                     // Maybe shift in new bits from `data`
                     while bits_read.get() >= 8 {
-                        current.set(current.get() |
-                                    (data[index.get() + 4] as u32) << (bits_read.get() - 8));
+                        let next_n = {
+                            let next_index = index.get();
+                            if next_index >= last_index {
+                                println!("WARN should probably not be here");
+                                0xff
+                            } else {
+                                data[next_index]
+                            }
+                        } as u32;
+                        current.set(current.get() | next_n << (bits_read.get() - 8));
+
                         bits_read.set(bits_read.get() - 8);
                         index.set(index.get() + 1);
                     }
+                    println!("return code length = {}", length);
                     return value;
                 }
             }
@@ -218,16 +248,29 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
         current.set(current.get() << n);
         bits_read.set(bits_read.get() + n as usize);
         while bits_read.get() >= 8 {
-            current.set(current.get() | (data[index.get() + 4] as u32) << (bits_read.get() - 8));
+            let next_index = index.get();
+            if next_index >= last_index {
+                panic!("we're already at the end!!");
+            }
+            current.set(current.get() | (data[next_index] as u32) << (bits_read.get() - 8));
             bits_read.set(bits_read.get() - 8);
             index.set(index.get() + 1);
         }
         number
     };
 
+    println!("current={:032b} (ignore last {} bits)",
+             current.get(),
+             bits_read.get());
+
     let dc_value_len = get_next_code(&dc_table);
+    println!("read {} bits", dc_value_len);
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
+    println!("dc_value_len={}\tdc_value={}\tdc_cof={}",
+             dc_value_len,
+             dc_value,
+             dc_cof);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);
@@ -255,11 +298,11 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
         n_pushed += (zeroes as usize) + 1;
     }
 
-    if bits_read.get() > 0 {
-        // Discard remaining bits in the half read byte
-        index.set(index.get() + 1);
-    }
-    (result, index.get() - 4)
+    scan_state.index = index.get() - 4;
+    scan_state.bits_read = bits_read.get();
+
+    println!("\n\n");
+    result
 }
 
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
