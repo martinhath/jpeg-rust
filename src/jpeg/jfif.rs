@@ -228,7 +228,8 @@ impl JFIFImage {
 
                     let start_spectral_section = vec[i + 5];
                     let end_spectral_section = vec[i + 6];
-                    let al_ah = vec[i + 7];
+                    let succ_approx_bit_pos_high = (vec[i + 7] & 0xf0) >> 4;
+                    let succ_approx_bit_pos_low = vec[i + 7] & 0x0f;
                     // `i` is now at the head of the data.
                     i += 8;
 
@@ -272,30 +273,25 @@ impl JFIFImage {
                         .expect(&format!("Did not find quantization table of id {}",
                                          quant_table_id));
 
+                    // Got the tables. Find out how many block we want to read,
+                    // read them, and put them in a vector.
+
+
+                    let n_blocks_x = 64;//(jfif_image.dimensions.0 + 7) / 8; // round up
+                    let n_blocks_y = 64;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let num_blocks = n_blocks_x * n_blocks_y;
+                    println!("decode {} blocks", num_blocks);
 
                     let mut raw_image_blocks = Vec::<Vec<i16>>::new();
-                    let n_blocks_x = (jfif_image.dimensions.0 + 7) / 8; // round up
-                    let n_blocks_y = (jfif_image.dimensions.1 + 7) / 8; // round up
-                    let mut read_state = None;
-                    // Keep track of where we are in the bit stream
-                    let mut cumulative_read_state = huffman::ReadState::new();
-
-                    for _ in 0..(n_blocks_x * n_blocks_y) {
-                        let (decoded, new_read_state) =
-                            huffman::decode(ac_table, dc_table, &vec[i..], read_state);
-                        cumulative_read_state += &new_read_state;
-                        read_state = Some(new_read_state);
-
+                    for block_i in 0..num_blocks {
+                        println!("decode block {} (i={})", block_i, i);
+                        let (decoded, bytes_read) = huffman::decode(ac_table, dc_table, &vec[i..]);
                         if decoded.len() != 64 {
                             panic!("length should be 64!!")
                         }
                         raw_image_blocks.push(decoded);
+                        i += bytes_read;
                     }
-
-                    if cumulative_read_state.bits_read != 0 {
-                        panic!("We have read some bits!!");
-                    }
-                    i += cumulative_read_state.index;
 
                     // Fix up DC coefficients - each num is encoded as the diff
                     // from the previous.
@@ -320,7 +316,12 @@ impl JFIFImage {
                                 .map(|&f| (f.round() + 128f32) as u8)
                                 .collect()
                         })
-                        .inspect(|b: &Vec<u8>| print_vector_dec(b.iter()))
+                        .enumerate()
+                        .map(|(i, b): (usize, Vec<u8>)| {
+                            println!("\nprint block #{}", i);
+                            print_vector_dec(b.iter());
+                            b
+                        })
                         .collect();
                 }
                 (0xff, 0xdd) => {
