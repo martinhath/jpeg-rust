@@ -198,6 +198,9 @@ impl JFIFImage {
                     // DC = 0, AC = 1
                     let table_class = (vec[i + 4] & 0xf0) >> 4;
                     let table_dest_id = vec[i + 4] & 0x0f;
+                    println!("get huffman table: class={} id={}",
+                             table_class,
+                             table_dest_id);
 
                     // There are size_area[i] number of codes of length i + 1.
                     let size_area: &[u8] = &vec[i + 5..i + 5 + 16];
@@ -270,35 +273,55 @@ impl JFIFImage {
                                          quant_table_id));
 
 
-                    let mut image_blocks = Vec::<Vec<u8>>::new();
+                    let mut raw_image_blocks = Vec::<Vec<i16>>::new();
                     let n_blocks_x = (jfif_image.dimensions.0 + 7) / 8; // round up
                     let n_blocks_y = (jfif_image.dimensions.1 + 7) / 8; // round up
+                    let mut read_state = None;
+                    // Keep track of where we are in the bit stream
+                    let mut cumulative_read_state = huffman::ReadState::new();
+
                     for _ in 0..(n_blocks_x * n_blocks_y) {
-                        let (decoded, num_read) = huffman::decode(ac_table, dc_table, &vec[i..]);
+                        let (decoded, new_read_state) =
+                            huffman::decode(ac_table, dc_table, &vec[i..], read_state);
+                        cumulative_read_state += &new_read_state;
+                        read_state = Some(new_read_state);
+
                         if decoded.len() != 64 {
                             panic!("length should be 64!!")
                         }
-
-                        let dequantized: Vec<i16> = quant_table.iter()
-                            .zip(decoded.iter())
-                            .map(|n| {
-                                println!("{:?}", n);
-                                n
-                            })
-                            .map(|(&q, &n)| (q as i16) * n)
-                            .collect();
-
-                        let dequantized_f32 = dequantized.iter().map(|&i| i as f32).collect();
-                        let spatial =
-                            transform::discrete_cosine_transform_inverse(&dequantized_f32);
-                        // TODO: u8 is probably not what we want?
-                        let rounded_and_shifted = spatial.iter()
-                            .map(|&f| (f.round() + 128f32) as u8);
-
-                        image_blocks.push(rounded_and_shifted.collect());
-
-                        i += num_read as usize;
+                        raw_image_blocks.push(decoded);
                     }
+
+                    if cumulative_read_state.bits_read != 0 {
+                        panic!("We have read some bits!!");
+                    }
+                    i += cumulative_read_state.index;
+
+                    // Fix up DC coefficients - each num is encoded as the diff
+                    // from the previous.
+                    let mut previous_dc = 0;
+                    for block in raw_image_blocks.iter_mut() {
+                        block[0] = previous_dc + block[0];
+                        previous_dc = block[0];
+                    }
+
+                    let image_blocks: Vec<Vec<u8>> = raw_image_blocks.iter()
+                        .map(|block| {
+                            block.iter()
+                                .zip(quant_table.iter())
+                                .map(|(&n, &q)| (q as i16) * n)
+                                .map(|i| i as f32)
+                        })
+                        .map(|block| {
+                            transform::discrete_cosine_transform_inverse(&block.collect())
+                        })
+                        .map(|block| {
+                            block.iter()
+                                .map(|&f| (f.round() + 128f32) as u8)
+                                .collect()
+                        })
+                        .inspect(|b: &Vec<u8>| print_vector_dec(b.iter()))
+                        .collect();
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
@@ -310,6 +333,8 @@ impl JFIFImage {
                     println!("\n\nUnhandled byte marker: {:02x} {:02x}",
                              vec[i],
                              vec[i + 1]);
+                    println!("i = {}", i);
+                    println!("Total vector len = {}", vec.len());
                     println!("len={}", data_length);
                     print_vector(vec.iter().skip(i));
                     break;

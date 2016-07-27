@@ -107,9 +107,41 @@ impl Table {
         codes
     }
 }
+
+#[derive(Debug)]
+pub struct ReadState {
+    pub index: usize,
+    pub bits_read: usize,
+}
+
+impl ReadState {
+    pub fn new() -> ReadState {
+        ReadState {
+            index: 0,
+            bits_read: 0,
+        }
+    }
+}
+
+use std::ops::AddAssign;
+impl<'a> AddAssign<&'a ReadState> for ReadState {
+    fn add_assign(&mut self, rhs: &'a ReadState) {
+        self.index = rhs.index;
+        self.bits_read += rhs.bits_read;
+        while self.bits_read >= 8 {
+            self.index += 1;
+            self.bits_read -= 8;
+        }
+    }
+}
+
 use std::cell::Cell;
 // TODO: Clean up this!
-pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usize) {
+pub fn decode(ac_table: &Table,
+              dc_table: &Table,
+              data: &[u8],
+              read_state: Option<ReadState>)
+              -> (Vec<i16>, ReadState) {
     // TODO: For now, assume there is at least four bytes to read.
 
     // Stagety: `current` holds data from the data slice. The next data
@@ -126,13 +158,25 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
     let mut result = Vec::<i16>::new();
-    let current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                                       ((data[3] as u32) << 8) |
-                                       ((data[3] as u32) << 0));
-    // Index of next value to read
-    let index = Cell::new(4);
+
     // Number of bits shifted off current
-    let bits_read: Cell<usize> = Cell::new(0);
+    let bits_read;
+    // Index of next value to read
+    let index;
+    match read_state {
+        Some(read_state) => {
+            index = Cell::new(read_state.index);
+            bits_read = Cell::new(read_state.bits_read);
+        }
+        None => {
+            index = Cell::new(0);
+            bits_read = Cell::new(0);
+        }
+    }
+    let current: Cell<u32> = Cell::new(((data[index.get() + 0] as u32) << 24) |
+                                       ((data[index.get() + 1] as u32) << 16) |
+                                       ((data[index.get() + 3] as u32) << 8) |
+                                       ((data[index.get() + 3] as u32) << 0));
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
@@ -153,7 +197,8 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
                 bits_read.set(bits_read.get() + length);
                 // Maybe shift in new bits from `data`
                 while bits_read.get() >= 8 {
-                    current.set(current.get() | (data[index.get()] as u32) << (bits_read.get() - 8));
+                    current.set(current.get() |
+                                (data[index.get() + 4] as u32) << (bits_read.get() - 8));
                     bits_read.set(bits_read.get() - 8);
                     index.set(index.get() + 1);
                 }
@@ -175,7 +220,7 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
         current.set(current.get() << n);
         bits_read.set(bits_read.get() + n as usize);
         while bits_read.get() >= 8 {
-            current.set(current.get() | (data[index.get()] as u32) << (bits_read.get() - 8));
+            current.set(current.get() | (data[index.get() + 4] as u32) << (bits_read.get() - 8));
             bits_read.set(bits_read.get() - 8);
             index.set(index.get() + 1);
         }
@@ -204,17 +249,16 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
         result.push(num as i16);
         n_pushed += (zeroes as usize) + 1;
     }
-    let mut data_number_read = index.get() - 4;
-    if bits_read.get() > 0 {
-        data_number_read += 1;
-    }
 
-    (result, data_number_read)
+    (result,
+     ReadState {
+        index: index.get(),
+        bits_read: bits_read.get(),
+    })
 }
 
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
     // TODO: find out where this is in the standard.
-    println!("dc_value_from_len_bits len={}", len);
     if len == 0 {
         return 0;
     }
