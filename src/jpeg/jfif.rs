@@ -22,7 +22,11 @@ impl JFIFUnits {
             1 => JFIFUnits::NoUnits,
             2 => JFIFUnits::DotsPerInch,
             3 => JFIFUnits::DotsPerCm,
-            _ => return Err(format!("Illegal unit byte: {}", byte)),
+            _ => {
+                println!("wtf is unit {}? Default to NoUnits", byte);
+                JFIFUnits::NoUnits
+            }
+            // _ => return Err(format!("Illegal unit byte: {}", byte)),
         })
     }
 }
@@ -31,12 +35,14 @@ impl JFIFUnits {
 #[allow(non_camel_case_types)]
 pub enum JFIFVersion {
     V1_01,
+    V1_02,
 }
 
 impl JFIFVersion {
     pub fn from_bytes(msb: u8, lsb: u8) -> Result<JFIFVersion, String> {
         Ok(match (msb, lsb) {
             (1, 1) => JFIFVersion::V1_01,
+            (1, 2) => JFIFVersion::V1_02,
             _ => return Err(format!("Illegal version: ({}, {})", msb, lsb)),
         })
     }
@@ -86,6 +92,23 @@ struct FrameComponentHeader {
     quantization_selector: u8,
 }
 
+#[derive(Debug)]
+struct ScanHeader {
+    num_components: u8,
+    scan_components: Vec<ScanComponentHeader>,
+    start_spectral_selection: u8,
+    end_spectral_selection: u8,
+    successive_approximation_bit_pos_high: u8,
+    successive_approximation_bit_pos_low: u8,
+}
+
+#[derive(Debug)]
+struct ScanComponentHeader {
+    scan_component_selector: u8,
+    dc_table_selector: u8,
+    ac_table_selector: u8,
+}
+
 #[allow(unused_variables)]
 impl JFIFImage {
     pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
@@ -95,6 +118,7 @@ impl JFIFImage {
         if vec.len() < 11 {
             return Err("input is too short".to_string());
         }
+        print_vector(vec.iter());
         let SOI = 0xd8;
         let APP0 = 0xe0;
         if vec[0] != 0xff || vec[1] != SOI || vec[2] != 0xff || vec[3] != APP0 ||
@@ -169,26 +193,27 @@ impl JFIFImage {
                     let num_lines = u8s_to_u16(&vec[i + 5..]);
                     let samples_per_line = u8s_to_u16(&vec[i + 7..]);
                     let image_components = vec[i + 9];
-                    if image_components != 1 {
-                        panic!("FIXME! 'Baseline DCT");
-                    }
-                    let component_id = vec[i + 10];
-                    let horizontal_sampling_factor = (vec[i + 11] & 0xf0) >> 4;
-                    let vertical_sampling_factor = vec[i + 11] & 0x0f;
-                    let quantization_selector = vec[i + 12];
 
-                    let frame_component = FrameComponentHeader {
-                        component_id: component_id,
-                        horizontal_sampling_factor: horizontal_sampling_factor,
-                        vertical_sampling_factor: vertical_sampling_factor,
-                        quantization_selector: quantization_selector,
-                    };
+                    let mut frame_components = Vec::with_capacity(image_components as usize);
+                    for component in 0..image_components {
+                        let component_id = vec[i + 10];
+                        let horizontal_sampling_factor = (vec[i + 11] & 0xf0) >> 4;
+                        let vertical_sampling_factor = vec[i + 11] & 0x0f;
+                        let quantization_selector = vec[i + 12];
+
+                        frame_components.push(FrameComponentHeader {
+                            component_id: component_id,
+                            horizontal_sampling_factor: horizontal_sampling_factor,
+                            vertical_sampling_factor: vertical_sampling_factor,
+                            quantization_selector: quantization_selector,
+                        });
+                    }
                     let frame_header = FrameHeader {
                         sample_precision: sample_precision,
                         num_lines: num_lines,
                         samples_per_line: samples_per_line,
                         image_components: image_components,
-                        frame_components: vec![frame_component],
+                        frame_components: frame_components,
                     };
                     jfif_image.frame_header = Some(frame_header)
                 }
@@ -196,40 +221,62 @@ impl JFIFImage {
                     // Define Huffman table
                     // JPEG B.2.4.2
                     // DC = 0, AC = 1
-                    let table_class = (vec[i + 4] & 0xf0) >> 4;
-                    let table_dest_id = vec[i + 4] & 0x0f;
-                    println!("get huffman table: class={} id={}",
-                             table_class,
-                             table_dest_id);
 
-                    // There are size_area[i] number of codes of length i + 1.
-                    let size_area: &[u8] = &vec[i + 5..i + 5 + 16];
-                    // Code i has value data_area[i]
-                    let data_area: &[u8] = &vec[i + 5 + 16..i + 4 + data_length];
-                    let huffman_table = huffman::Table::from_size_data_tables(size_area, data_area);
-                    let ind = table_dest_id as usize;
-                    if table_class == 0 {
-                        jfif_image.huffman_dc_tables[ind] = Some(huffman_table);
-                    } else {
-                        jfif_image.huffman_ac_tables[ind] = Some(huffman_table);
+                    let mut huffman_index = i + 4;
+                    let target_index = i + data_length;
+                    // Read tables untill the segment is done
+
+                    while huffman_index < target_index {
+                        let table_class = (vec[huffman_index] & 0xf0) >> 4;
+                        let table_dest_id = vec[huffman_index] & 0x0f;
+                        huffman_index += 1;
+
+                        // There are size_area[i] number of codes of length i + 1.
+                        let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
+                        let number_of_codes = size_area.iter().fold(0u8, |a, b| a + *b) as usize;
+
+                        huffman_index += 16;
+                        // Code i has value data_area[i]
+                        let data_area: &[u8] = &vec[huffman_index..huffman_index + number_of_codes];
+                        huffman_index += number_of_codes;
+
+                        let huffman_table = huffman::Table::from_size_data_tables(size_area,
+                                                                                  data_area);
+                        println!("Huffman table: id={}, class={}", table_dest_id, table_class);
+                        huffman_table.print_table();
+                        if table_class == 0 {
+                            jfif_image.huffman_dc_tables[table_dest_id as usize] =
+                                Some(huffman_table);
+                        } else {
+                            jfif_image.huffman_ac_tables[table_dest_id as usize] =
+                                Some(huffman_table);
+                        }
                     }
                 }
                 (0xff, 0xda) => {
+                    println!("start of scan");
                     // Start of Scan
                     // JPEG B.2.3
-                    let num_components = vec[i + 4];
-                    if num_components != 1 {
-                        panic!("FIXME! I took the easy way!")
-                    }
-                    let scan_component_selector = vec[i + 5];
-                    let dc_table_id = (vec[i + 6] & 0xf0) >> 4;
-                    let ac_table_id = vec[i + 6] & 0x0f;
-                    i += 2 * num_components as usize;
 
-                    let start_spectral_section = vec[i + 5];
-                    let end_spectral_section = vec[i + 6];
-                    let succ_approx_bit_pos_high = (vec[i + 7] & 0xf0) >> 4;
-                    let succ_approx_bit_pos_low = vec[i + 7] & 0x0f;
+                    let num_components = vec[i + 4];
+                    let mut scan_components = Vec::new();
+                    for component in 0..num_components {
+                        scan_components.push(ScanComponentHeader {
+                            scan_component_selector: vec[i + 5],
+                            dc_table_selector: (vec[i + 6] & 0xf0) >> 4,
+                            ac_table_selector: vec[i + 6] & 0x0f,
+                        });
+                        i += 2;
+                    }
+
+                    let scan_header = ScanHeader {
+                        num_components: num_components,
+                        scan_components: scan_components,
+                        start_spectral_selection: vec[i + 5],
+                        end_spectral_selection: vec[i + 6],
+                        successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
+                        successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
+                    };
                     // `i` is now at the head of the data.
                     i += 8;
 
@@ -241,11 +288,16 @@ impl JFIFImage {
                     //       Check if it is handled: `(0xff, 0xdd)`
 
 
-                    let ac_table = jfif_image.huffman_ac_tables[ac_table_id as usize]
+
+                    let ref scan_component_header = scan_header.scan_components[0];
+
+                    let ac_table = jfif_image
+                        .huffman_ac_tables[scan_component_header.ac_table_selector as usize]
                         .as_ref()
                         .expect("Did not find AC table");
 
-                    let dc_table = jfif_image.huffman_dc_tables[dc_table_id as usize]
+                    let dc_table = jfif_image
+                        .huffman_dc_tables[scan_component_header.dc_table_selector as usize]
                         .as_ref()
                         .expect("Did not find DC table");
 
@@ -254,14 +306,15 @@ impl JFIFImage {
                     //       recovery is not an option?
                     let quant_table_id = match jfif_image.frame_header {
                         Some(ref frame_header) => {
-                            match frame_header.component_header(scan_component_selector) {
+                            match frame_header
+                                .component_header(scan_component_header.scan_component_selector) {
                                 Some(frame_component_header) => {
                                     frame_component_header.quantization_selector
                                 }
                                 None => {
                                     panic!(format!("Could not find frame component for \
                                                      scan_component_selector {}",
-                                                   scan_component_selector))
+                                                   scan_component_header.scan_component_selector))
                                 }
                             }
                         }
@@ -277,9 +330,9 @@ impl JFIFImage {
                     // read them, and put them in a vector.
 
 
-                    let n_blocks_x = 64;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let n_blocks_y = 64;//(jfif_image.dimensions.1 + 7) / 8; // round up
-                    let num_blocks = n_blocks_x * n_blocks_y;
+                    let n_blocks_x = 1;//(jfif_image.dimensions.0 + 7) / 8; // round up
+                    let n_blocks_y = 1;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let num_blocks = n_blocks_x * n_blocks_y * scan_header.num_components;
                     println!("decode {} blocks", num_blocks);
 
                     let mut raw_image_blocks = Vec::<Vec<i16>>::new();
@@ -329,6 +382,17 @@ impl JFIFImage {
                     // JPEG B.2.4.4
                     // TODO: support this
                     panic!("got to restart interval def")
+                }
+                (0xff, 0xec) => {
+                    // Application segment 12
+                    // Not to be found in the standard?
+                    //
+                    //      http://wooyaggo.tistory.com/104
+                    //
+                    // TODO: should clear this up.
+                }
+                (0xff, 0xee) => {
+                    // Application segment 14
                 }
                 _ => {
                     println!("\n\nUnhandled byte marker: {:02x} {:02x}",
@@ -400,6 +464,7 @@ fn print_vector_dec<I>(iter: I)
 ///  9 10 14 15
 /// ```
 ///
+#[allow(dead_code)]
 fn zigzag<T>(vec: Vec<T>) -> Vec<T>
     where T: Copy
 {

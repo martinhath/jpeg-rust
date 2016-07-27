@@ -223,7 +223,7 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
 
     let dc_value_len = get_next_code(&dc_table);
     let dc_value = read_n_bits(dc_value_len);
-    let mut dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
+    let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);

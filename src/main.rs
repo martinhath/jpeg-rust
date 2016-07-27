@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 mod transform;
 mod jpeg;
-use std::f32;
+// use std::f32;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -166,7 +166,8 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
+    // let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
+    let bytes = file_to_bytes(Path::new("./huff_simple0.jpg"));
 
-    let image = JFIFImage::parse(bytes).unwrap();
+    let _ = JFIFImage::parse(bytes).unwrap();
 }
