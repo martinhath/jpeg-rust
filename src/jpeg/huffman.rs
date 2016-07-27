@@ -5,6 +5,11 @@ use std::cmp::min;
 const BIT_MASKS: [u16; 17] = [0x0, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00,
                               0xFF80, 0xFFC0, 0xFFE0, 0xFFF0, 0xFFF8, 0xFFFC, 0xFFFE, 0xFFFF];
 
+// TODO: Naming in this file is so bad..
+// size_table? table? code_vecs? bah..
+// PLEASE FIX!!
+
+
 #[derive(Debug)]
 pub struct Table {
     /// ID -> code value lookup table.
@@ -46,13 +51,11 @@ impl Table {
                                             Vec::new(), Vec::new(), Vec::new(), Vec::new(),
                                             Vec::new(), Vec::new(), Vec::new(), Vec::new(),
                                             Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-        for i in 1..16 {
-            let ref mut vec = code_vecs[i - 1];
-            for j in 0..size_table.len() {
-                if size_table[j] == i as u8 {
-                    vec.push(j as u8);
-                }
-            }
+
+        for id in 0..code_table.len() {
+            let length = size_table[id] as usize;
+            let ref mut vec = code_vecs[length - 1];
+            vec.push(id as u8);
         }
 
         Table {
@@ -118,7 +121,7 @@ impl Table {
             for &id in vec.iter() {
                 let code = self.code_table[id as usize];
                 let code_string = format!("{:01$b}", code, len);
-                println!("#{:3}\t{:3}\t{:>16}",
+                println!("#{:3}\t{:3}\t{:<16}",
                          id,
                          self.data_table[id as usize],
                          code_string);
@@ -145,6 +148,7 @@ pub fn decode(ac_table: &Table, dc_table: &Table, data: &[u8]) -> (Vec<i16>, usi
     //
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`?
+    let last_index = data.len();
     let current: Cell<u32> = Cell::new(((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
                                        ((data[3] as u32) << 8) |
                                        ((data[3] as u32) << 0));

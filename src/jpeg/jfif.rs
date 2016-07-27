@@ -227,16 +227,20 @@ impl JFIFImage {
                     // Read tables untill the segment is done
 
                     while huffman_index < target_index {
+                        println!("starting huffman read when huffman={} target={}",
+                                 huffman_index,
+                                 target_index);
                         let table_class = (vec[huffman_index] & 0xf0) >> 4;
                         let table_dest_id = vec[huffman_index] & 0x0f;
                         huffman_index += 1;
 
-                        // There are size_area[i] number of codes of length i + 1.
+                        // There are `size_area[i]` number of codes of length `i + 1`.
                         let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
                         let number_of_codes = size_area.iter().fold(0u8, |a, b| a + *b) as usize;
+                        println!("number of codes: {}", number_of_codes);
 
                         huffman_index += 16;
-                        // Code i has value data_area[i]
+                        // Code `i` has value `data_area[i]`
                         let data_area: &[u8] = &vec[huffman_index..huffman_index + number_of_codes];
                         huffman_index += number_of_codes;
 
@@ -252,6 +256,7 @@ impl JFIFImage {
                                 Some(huffman_table);
                         }
                     }
+                    println!("end with huffman={} target={}", huffman_index, target_index);
                 }
                 (0xff, 0xda) => {
                     println!("start of scan");
