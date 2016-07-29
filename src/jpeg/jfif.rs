@@ -63,51 +63,76 @@ pub struct JFIFImage {
     quantization_tables: [Option<Vec<u8>>; 4],
     // TODO: multiple frames ?
     frame_header: Option<FrameHeader>,
-
-    // tmp
-    data_index: usize,
-    raw_data: Vec<u8>, // TOOD: add all options, such as progressive/sequential, etc.
 }
 
 #[derive(Debug)]
 struct FrameHeader {
+    /// Bits per sample of each component in the frame
     sample_precision: u8,
+    /// The maximum number of lines in the source image
     num_lines: u16,
+    /// The maximum number of samples per line in the source image
     samples_per_line: u16,
+    /// Number of image components in the frame
     image_components: u8,
+    /// Headers for each component
     frame_components: Vec<FrameComponentHeader>,
-}
-
-impl FrameHeader {
-    fn component_header(&self, id: u8) -> Option<&FrameComponentHeader> {
-        self.frame_components.iter().find(|c| c.component_id == id)
-    }
 }
 
 #[derive(Debug)]
 struct FrameComponentHeader {
+    /// Component id
     component_id: u8,
+    /// Relationship between component horizontal dimension and maximum image dimension (?)
     horizontal_sampling_factor: u8,
+    /// Relationship between component vertical dimension and maximum image dimension (?)
     vertical_sampling_factor: u8,
+    /// Selector for this components quantization table
     quantization_selector: u8,
 }
 
 #[derive(Debug)]
 struct ScanHeader {
+    /// Number of components in the scan.
     num_components: u8,
+    /// Headers for each component
     scan_components: Vec<ScanComponentHeader>,
+    /// (?) Should be zero for seq. DCT
     start_spectral_selection: u8,
+    /// (?) Should be 63 for seq. DCT
     end_spectral_selection: u8,
+    /// Something something point transform
     successive_approximation_bit_pos_high: u8,
+    /// Something something point transform
     successive_approximation_bit_pos_low: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ScanComponentHeader {
     scan_component_selector: u8,
     dc_table_selector: u8,
     ac_table_selector: u8,
 }
+
+impl FrameHeader {
+    fn quantization_table_id(&self, component: u8) -> Option<u8> {
+        self.frame_components
+            .iter()
+            .find(|&comp_hdr| comp_hdr.component_id == component)
+            .map(|ref comp_hdr| comp_hdr.quantization_selector)
+
+    }
+}
+
+impl ScanHeader {
+    fn scan_component_header(&self, component: u8) -> Option<ScanComponentHeader> {
+        self.scan_components
+            .iter()
+            .find(|sch| sch.scan_component_selector == component)
+            .map(|sch| sch.clone())
+    }
+}
+
 
 #[allow(unused_variables)]
 impl JFIFImage {
@@ -146,15 +171,12 @@ impl JFIFImage {
             huffman_dc_tables: [None, None, None, None],
             quantization_tables: [None, None, None, None],
             frame_header: None,
-
-            data_index: 0,
-            raw_data: Vec::new(),
         };
 
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
 
         let mut i = 20;
-        loop {
+        while i < vec.len() {
             // All segments have a 2 byte length
             // right after the marker code
             let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
@@ -273,6 +295,9 @@ impl JFIFImage {
                         i += 2;
                     }
 
+                    // TODO: Do we want to put the scan header in `FrameHeader`?
+                    // We don't need it for simple decoding, but it might be useful
+                    // if we want to print info (eg, all headers) for an image.
                     let scan_header = ScanHeader {
                         num_components: num_components,
                         scan_components: scan_components,
@@ -435,8 +460,7 @@ impl JFIFImage {
             }
             i += 4 + data_length;
         }
-        panic!("WHAT TO DO");
-        // Ok(jfif_image)
+        Ok(jfif_image)
     }
 }
 
