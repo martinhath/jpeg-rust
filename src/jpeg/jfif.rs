@@ -217,11 +217,12 @@ impl JFIFImage {
                     let image_components = vec[i + 9];
 
                     let mut frame_components = Vec::with_capacity(image_components as usize);
+                    let mut index = i + 10;
                     for component in 0..image_components {
-                        let component_id = vec[i + 10];
-                        let horizontal_sampling_factor = (vec[i + 11] & 0xf0) >> 4;
-                        let vertical_sampling_factor = vec[i + 11] & 0x0f;
-                        let quantization_selector = vec[i + 12];
+                        let component_id = vec[index];
+                        let horizontal_sampling_factor = (vec[index] & 0xf0) >> 4;
+                        let vertical_sampling_factor = vec[index] & 0x0f;
+                        let quantization_selector = vec[index];
 
                         frame_components.push(FrameComponentHeader {
                             component_id: component_id,
@@ -229,6 +230,7 @@ impl JFIFImage {
                             vertical_sampling_factor: vertical_sampling_factor,
                             quantization_selector: quantization_selector,
                         });
+                        index += 3;
                     }
                     let frame_header = FrameHeader {
                         sample_precision: sample_precision,
