@@ -159,36 +159,45 @@ pub fn decode(ac_table: &Table,
     // TODO: what if `data` is empty, and we have the bits we need to
     //       finish in `current`? Probably not a problem, even though
     //       we will have non scan data in `current`.
+    // TODO: naming - this is first illegal index.
     let last_index = data.len();
 
     // Need to check data[0-4] for 0xff bytes.
+    // We might skip some bytes (eg when 0xff 0x00),
+    // so this is the number of bytes actually read
+    // (will usually be 4).
+    let actual_n_bytes_read;
     // TODO: do this smarter!
-    let bytes_read_from_start;
     let current: Cell<u32> = Cell::new({
         let mut curr: u32 = 0;
         let mut i = scan_state.index;
         for it in 0..4 {
-            let shift_length = 24 - it * 8;
-            let num = data[i];
+            let num = if i < last_index {
+                data[i]
+            } else {
+                0xaa
+            };
             // If we find 0xff 0x00 0x??, make it 0xff 0x??
-            if data[i] == 0xff {
-                if data[i + 1] != 0x00 {
-                    panic!("Did not handle this case!");
-                }
+            // This "solution" doesn't quite work, as
+            // we may find the 0xff byte multiple times,
+            // for instance we find it `i=3` first, then read
+            // a whole byte, and find it again when `i=2`.
+            if i < (last_index - 1) && data[i] == 0xff && data[i + 1] == 0x00 {
                 i += 1;
             }
 
-            i += 1;
+            let shift_length = 24 - it * 8;
             curr |= (num as u32) << shift_length;
+            i += 1;
         }
-        bytes_read_from_start = i;
+        actual_n_bytes_read = i - scan_state.index;
         curr
     });
 
     // Number of bits shifted off current
-    let bits_read = Cell::new(scan_state.index);
+    let bits_read = Cell::new(scan_state.bits_read);
     // Index of next value to read
-    let index = Cell::new(scan_state.index + bytes_read_from_start);
+    let index = Cell::new(scan_state.index + actual_n_bytes_read);
 
     if scan_state.bits_read > 0 {
         current.set(current.get() << scan_state.bits_read);
@@ -211,13 +220,15 @@ pub fn decode(ac_table: &Table,
                     let value = table.data_table[idu];
                     current.set(current.get() << length);
                     bits_read.set(bits_read.get() + length);
+
                     // Maybe shift in new bits from `data`
                     while bits_read.get() >= 8 {
                         let next_n = {
                             let next_index = index.get();
                             if next_index >= last_index {
+                                // Might come here at the very end
                                 println!("WARN should probably not be here");
-                                0xff
+                                0xaa
                             } else {
                                 data[next_index]
                             }
@@ -227,7 +238,6 @@ pub fn decode(ac_table: &Table,
                         bits_read.set(bits_read.get() - 8);
                         index.set(index.get() + 1);
                     }
-                    println!("return code length = {}", length);
                     return value;
                 }
             }
@@ -259,18 +269,10 @@ pub fn decode(ac_table: &Table,
         number
     };
 
-    println!("current={:032b} (ignore last {} bits)",
-             current.get(),
-             bits_read.get());
-
     let dc_value_len = get_next_code(&dc_table);
-    println!("read {} bits", dc_value_len);
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
-    println!("dc_value_len={}\tdc_value={}\tdc_cof={}",
-             dc_value_len,
-             dc_value,
-             dc_cof);
+    println!("read dc={}", dc_cof);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);
@@ -298,10 +300,18 @@ pub fn decode(ac_table: &Table,
         n_pushed += (zeroes as usize) + 1;
     }
 
-    scan_state.index = index.get() - 4;
-    scan_state.bits_read = bits_read.get();
+    let mut bits_read = bits_read.get();
+    let mut index = index.get();
 
-    println!("\n\n");
+    // Normalize `index` and `bits_read`
+    while bits_read >= 8 {
+        index += 1;
+        bits_read -= 8;
+    }
+
+    scan_state.index = index - 4;
+    scan_state.bits_read = bits_read;
+
     result
 }
 
