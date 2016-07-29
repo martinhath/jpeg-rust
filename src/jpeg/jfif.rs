@@ -116,11 +116,13 @@ struct ScanComponentHeader {
 
 impl FrameHeader {
     fn quantization_table_id(&self, component: u8) -> Option<u8> {
-        self.frame_components
+        println!("quanization_table_id({})", component);
+        let res = self.frame_components
             .iter()
             .find(|&comp_hdr| comp_hdr.component_id == component)
-            .map(|ref comp_hdr| comp_hdr.quantization_selector)
-
+            .map(|ref comp_hdr| comp_hdr.quantization_selector);
+        println!("got {:?}", res);
+        res
     }
 }
 
@@ -197,16 +199,25 @@ impl JFIFImage {
                     // Quantization tables
                     // JPEG B.2.4.1
 
-                    let precision = (vec[i + 4] & 0xf0) >> 4;
-                    let identifier = vec[i + 4] & 0x0f;
-                    let quant_values = &vec[i + 5..i + 4 + data_length];
-                    // TODO: we probably dont need to copy and collect here.
-                    // Would rather have a slice in quant_tables, with a
-                    // lifetime the same as jfif_image (?)
-                    let table = quant_values.iter()
-                        .map(|u| *u)
-                        .collect();
-                    jfif_image.quantization_tables[identifier as usize] = Some(table);
+                    println!("quant tables: {}", data_length);
+
+                    let mut index = i + 4;
+                    while index < i + 4 + data_length {
+                        let precision = (vec[index] & 0xf0) >> 4;
+                        let identifier = vec[index] & 0x0f;
+                        println!("id={}", identifier);
+
+                        // TODO: we probably dont need to copy and collect here.
+                        // Would rather have a slice in quant_tables, with a
+                        // lifetime the same as jfif_image (?)
+                        let table: Vec<u8> = vec[index + 1..]
+                            .iter()
+                            .take(64)
+                            .map(|u| *u)
+                            .collect();
+                        jfif_image.quantization_tables[identifier as usize] = Some(table);
+                        index += 65; // 64 entries + one header byte
+                    }
                 }
                 (0xff, 0xc0) => {
                     // Baseline DCT
@@ -220,9 +231,9 @@ impl JFIFImage {
                     let mut index = i + 10;
                     for component in 0..image_components {
                         let component_id = vec[index];
-                        let horizontal_sampling_factor = (vec[index] & 0xf0) >> 4;
-                        let vertical_sampling_factor = vec[index] & 0x0f;
-                        let quantization_selector = vec[index];
+                        let horizontal_sampling_factor = (vec[index + 1] & 0xf0) >> 4;
+                        let vertical_sampling_factor = vec[index + 1] & 0x0f;
+                        let quantization_selector = vec[index + 2];
 
                         frame_components.push(FrameComponentHeader {
                             component_id: component_id,
