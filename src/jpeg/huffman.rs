@@ -212,6 +212,11 @@ pub fn decode(ac_table: &Table,
             let mask = BIT_MASKS[length];
             let code_candidate: u16 = ((current16 & mask) >> (16 - length)) as u16;
 
+            if current16 == 65451 {
+                println!("trying length={}", length);
+                println!("there are {} codes of that length\n",
+                         table.code_vecs[length - 1].len());
+            }
             for &id in table.code_vecs[length - 1].iter() {
                 let idu = id as usize;
                 let code = table.code_table[idu];
@@ -242,8 +247,7 @@ pub fn decode(ac_table: &Table,
                 }
             }
         }
-        panic!("failed to find code for current: {:16b}",
-               (current.get() >> 16));
+        panic!("failed to find code for current: {:16b}", current16);
     };
     let read_n_bits = |n: u8| -> u32 {
         // TODO: implement properly
@@ -272,7 +276,6 @@ pub fn decode(ac_table: &Table,
     let dc_value_len = get_next_code(&dc_table);
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
-    println!("read dc={}", dc_cof);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);
@@ -289,8 +292,12 @@ pub fn decode(ac_table: &Table,
             break;
         }
         if next_code == 0xf0 {
-            panic!("GOT 0xf0");
+            let num_to_push = min(16, 64 - n_pushed);
+            result.extend(repeat(0).take(num_to_push));
+            n_pushed += num_to_push;
+            continue;
         }
+
         let zeroes = ((next_code & 0xf0) >> 4) as usize;
         let num = next_code & 0x0f;
         for _ in 0..min(zeroes, 64 - n_pushed - 1) {

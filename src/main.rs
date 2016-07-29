@@ -166,8 +166,9 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
+    // let bytes = file_to_bytes(Path::new("./lena-bw.jpeg"));
     // let bytes = file_to_bytes(Path::new("./huff_simple0.jpg"));
+    let bytes = file_to_bytes(Path::new("./lena.jpeg"));
 
     let _ = JFIFImage::parse(bytes).unwrap();
 }

@@ -271,6 +271,8 @@ impl JFIFImage {
 
                         let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                   data_area);
+                        println!("huffman table {}, {}", table_dest_id, table_class);
+                        huffman_table.print_table();
                         if table_class == 0 {
                             jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                 Some(huffman_table);
@@ -347,8 +349,8 @@ impl JFIFImage {
 
                     // Step 1:
                     // Read all blocks.
-                    let num_blocks_hori = 1;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let num_blocks_vert = 2;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let num_blocks_hori = 16;//(jfif_image.dimensions.0 + 7) / 8; // round up
+                    let num_blocks_vert = 16;//(jfif_image.dimensions.1 + 7) / 8; // round up
                     let num_blocks = num_blocks_hori * num_blocks_vert;
 
                     let mut scan_state = huffman::ScanState {
@@ -356,10 +358,8 @@ impl JFIFImage {
                         bits_read: 0,
                     };
                     for block_i in 0..num_blocks {
-                        println!("Decoding block {}", block_i + 1);
                         for component in scan_header.scan_components.iter() {
                             let component_id = component.scan_component_selector;
-                            println!("\tComponent {}", component_id);
 
                             // Get tables
                             // TODO: Probably don't do this inside this loop.
@@ -405,6 +405,7 @@ impl JFIFImage {
                             .as_ref()
                             .unwrap();
 
+                        let mut new_component_blocks = Vec::new();
                         let mut previous_dc = 0;
                         for block in component_blocks.iter_mut() {
                             // DC correction
@@ -420,14 +421,64 @@ impl JFIFImage {
                             let spatial_block =
                                 transform::discrete_cosine_transform_inverse(&dequantized);
 
-                            let color_values = spatial_block.iter()
-                                .map(|n| (n + 128f32).round() as u8);
+                            let color_values: Vec<_> = spatial_block.iter()
+                                .map(|n| (n + 128f32).round() as i16)
+                                .collect();
 
-                            println!("hehe ");
-                            print_vector_dec(color_values);
-                            println!("hehe ");
+                            new_component_blocks.push(color_values);
+                        }
+                        *component_blocks = new_component_blocks;
+                    }
+
+                    // Step 3:
+                    // Merge the components. For now, assume YCbCr, and
+                    // convert to RGB.
+                    if num_components != 3 {
+                        panic!("convert from greyscale to rgb");
+                    }
+                    let mut rgbBlocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
+                    for block_i in 0..num_blocks {
+                        let ref y_block = blocks[0][block_i];
+                        let ref cb_block = blocks[1][block_i];
+                        let ref cr_block = blocks[2][block_i];
+
+                        let c_red: f32 = 0.299;
+                        let c_green: f32 = 0.587;
+                        let c_blue: f32 = 0.114;
+
+                        let block: Vec<(u8, u8, u8)> = y_block.iter()
+                            .zip(cb_block.iter())
+                            .zip(cr_block.iter())
+                            .map(|((&y, &cb), &cr)| (y as u8, cb as u8, cr as u8))
+                            // .map(|(y, cb, cr)| {
+                            //     println!("YCbCR=({}, {}, {})", y, cb, cr);
+                            //     let r: u8 = cr * ((2.0 - 2.0 * c_red) as u8) + y;
+                            //     let g: u8 = cb * ((2.0 - 2.0 * c_blue) as u8) + y;
+                            //     let b: u8 = {
+                            //         let yf = y as f32;
+                            //         let cbf = cb as f32;
+                            //         let crf = cr as f32;
+                            //         ((yf - c_blue * cbf - c_red * crf) / c_green) as u8
+                            //     };
+                            //     println!("RGB=({}. {}, {})", r, g, b);
+                            //     (r, g, b)
+                            // })
+                            .collect();
+                        rgbBlocks.push(block);
+                    }
+
+                    use std::fs::File;
+                    use std::io::Write;
+                    let mut file = File::create("output.ppm").unwrap();
+                    file.write(b"P6\n128 128\n255\n");
+                    for block in rgbBlocks.iter() {
+                        for &(r, g, b) in block {
+                            println!("{:3},{:3},{:3}", r, g, b);
+                            file.write(&[r, g, b]);
                         }
                     }
+
+
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
