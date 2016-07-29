@@ -116,12 +116,10 @@ struct ScanComponentHeader {
 
 impl FrameHeader {
     fn quantization_table_id(&self, component: u8) -> Option<u8> {
-        println!("quanization_table_id({})", component);
         let res = self.frame_components
             .iter()
             .find(|&comp_hdr| comp_hdr.component_id == component)
             .map(|ref comp_hdr| comp_hdr.quantization_selector);
-        println!("got {:?}", res);
         res
     }
 }
@@ -193,19 +191,15 @@ impl JFIFImage {
                             "".to_string()
                         }
                     };
-                    // println!("found comment '{}'", comment);
                 }
                 (0xff, 0xdb) => {
                     // Quantization tables
                     // JPEG B.2.4.1
 
-                    println!("quant tables: {}", data_length);
-
                     let mut index = i + 4;
                     while index < i + 4 + data_length {
                         let precision = (vec[index] & 0xf0) >> 4;
                         let identifier = vec[index] & 0x0f;
-                        println!("id={}", identifier);
 
                         // TODO: we probably dont need to copy and collect here.
                         // Would rather have a slice in quant_tables, with a
@@ -262,9 +256,6 @@ impl JFIFImage {
                     // Read tables untill the segment is done
 
                     while huffman_index < target_index {
-                        // println!("starting huffman read when huffman={} target={}",
-                        //          huffman_index,
-                        //          target_index);
                         let table_class = (vec[huffman_index] & 0xf0) >> 4;
                         let table_dest_id = vec[huffman_index] & 0x0f;
                         huffman_index += 1;
@@ -280,8 +271,6 @@ impl JFIFImage {
 
                         let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                   data_area);
-                        // println!("Huffman table: id={}, class={}", table_dest_id, table_class);
-                        // huffman_table.print_table();
                         if table_class == 0 {
                             jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                 Some(huffman_table);
@@ -290,10 +279,8 @@ impl JFIFImage {
                                 Some(huffman_table);
                         }
                     }
-                    // println!("end with huffman={} target={}", huffman_index, target_index);
                 }
                 (0xff, 0xda) => {
-                    println!("start of scan");
                     // Start of Scan
                     // JPEG B.2.3
 
@@ -319,129 +306,128 @@ impl JFIFImage {
                         successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                         successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                     };
-                    // `i` is now at the head of the data.
                     i += 8;
+                    // `i` is now at the head of the data.
 
-                    // After the scan header is parsed, we start to read data.
-                    // See Figure B.2 in B.2.1
+                    // Maybe reading components independently isn't a bad idea:
                     //
-                    // But first, we get all the tables.
-                    // NOTE: this assumes no restart!
-                    //       Check if it is handled: `(0xff, 0xdd)`
+                    //  blocks = [[]], 2d one arr for each component
+                    //  for block in num_blocks {
+                    //      for component in components {
+                    //          get_headers(component_id)
+                    //          block = read_component()
+                    //          blocks[component_num].push(block)
+                    //      }
+                    //  }
 
-
-
-                    // Should have switched component !
-                    // Stragegy (?) either loop over num blocks out here,
-                    // and loop each component, and read one block (sounds _slow),
-                    // or preprocess the tables in a vector, so that getting the tables
-                    // are simple. Then, loop
-                    //
-                    //     for _ in 0..x*y {
-                    //         for c in 0..n_compo {
-                    //             get_tables;
-                    //             read_block
-                    //         }
-                    //     }
-                    //
-
-
-                    let ref scan_component_header = scan_header.scan_components[0];
-
-                    let ac_table = jfif_image
-                        .huffman_ac_tables[scan_component_header.ac_table_selector as usize]
-                        .as_ref()
-                        .expect("Did not find AC table");
-
-                    let dc_table = jfif_image
-                        .huffman_dc_tables[scan_component_header.dc_table_selector as usize]
-                        .as_ref()
-                        .expect("Did not find DC table");
-
-                    // TODO: Should find a better way of doing this,
-                    //       as either `None` is a bad error, from which
-                    //       recovery is not an option?
-                    let quant_table_id = match jfif_image.frame_header {
-                        Some(ref frame_header) => {
-                            match frame_header
-                                .component_header(scan_component_header.scan_component_selector) {
-                                Some(frame_component_header) => {
-                                    frame_component_header.quantization_selector
-                                }
-                                None => {
-                                    panic!(format!("Could not find frame component for \
-                                                     scan_component_selector {}",
-                                                   scan_component_header.scan_component_selector))
-                                }
-                            }
+                    // Map component_id to an index
+                    let component_index_from_id = {
+                        let mut map_component_to_i: Vec<u8> = scan_header.scan_components
+                            .iter()
+                            .map(|c| c.scan_component_selector)
+                            .collect();
+                        move |component: u8| {
+                            map_component_to_i.iter()
+                                .enumerate()
+                                .find(|&(i, id)| *id == component)
+                                .map(|(i, id)| i as usize)
                         }
-                        None => panic!("jfif_image has no frame_header!"),
                     };
+                    // Map index to component_id
+                    let component_ids: Vec<u8> = scan_header.scan_components
+                        .iter()
+                        .map(|c| c.scan_component_selector)
+                        .collect();
 
-                    let ref quant_table = jfif_image.quantization_tables[quant_table_id as usize]
-                        .as_ref()
-                        .expect(&format!("Did not find quantization table of id {}",
-                                         quant_table_id));
-
-                    // Got the tables. Find out how many block we want to read,
-                    // read them, and put them in a vector.
+                    // For each component, create a Vec to hold the decoded blocks
+                    let num_components = scan_header.num_components;
+                    let mut blocks: Vec<Vec<Vec<i16>>> =
+                        (0..num_components).map(|_| Vec::new()).collect();
 
 
-                    let n_blocks_x = 1;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let n_blocks_y = 2;//(jfif_image.dimensions.1 + 7) / 8; // round up
-                    let num_blocks = n_blocks_x * n_blocks_y * scan_header.num_components;
-                    println!("decode {} blocks", num_blocks);
+                    // Step 1:
+                    // Read all blocks.
+                    let num_blocks_hori = 1;//(jfif_image.dimensions.0 + 7) / 8; // round up
+                    let num_blocks_vert = 2;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let num_blocks = num_blocks_hori * num_blocks_vert;
 
                     let mut scan_state = huffman::ScanState {
                         index: 0,
                         bits_read: 0,
                     };
-                    let mut raw_image_blocks = Vec::<Vec<i16>>::new();
                     for block_i in 0..num_blocks {
+                        println!("Decoding block {}", block_i + 1);
+                        for component in scan_header.scan_components.iter() {
+                            let component_id = component.scan_component_selector;
+                            println!("\tComponent {}", component_id);
 
-                        println!("decode block {} (i={})", block_i, i);
-                        println!("{:?}", scan_state);
-                        print_vector_bin(vec.iter().skip(i + scan_state.index));
+                            // Get tables
+                            // TODO: Probably don't do this inside this loop.
+                            //       Would rather move it outside, and use lookup
+                            //       in here, with `component_id`.
+                            let scan_component_header: ScanComponentHeader =
+                                scan_header.scan_component_header(component_id)
+                                    .expect("ADD ERROR HANDLING");
+                            let ac_index = scan_component_header.ac_table_selector as usize;
+                            let ac_table = jfif_image.huffman_ac_tables[ac_index]
+                                .as_ref()
+                                .expect("ERROR FAIL xdd");
+                            let dc_index = scan_component_header.dc_table_selector as usize;
+                            let dc_table = jfif_image.huffman_dc_tables[dc_index]
+                                .as_ref()
+                                .expect("ERROR FAIL xdd");
 
-                        let decoded =
-                            huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
-                        if decoded.len() != 64 {
-                            panic!("length should be 64!!")
+                            let decoded =
+                                huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
+                            if decoded.len() != 64 {
+                                panic!("length should be 64!!")
+                            }
+
+                            blocks[component_index_from_id(component_id).unwrap()].push(decoded);
                         }
-                        raw_image_blocks.push(decoded);
-                        // i += scan_state.bits_read;
                     }
 
-                    // Fix up DC coefficients - each num is encoded as the diff
-                    // from the previous.
-                    let mut previous_dc = 0;
-                    for block in raw_image_blocks.iter_mut() {
-                        block[0] = previous_dc + block[0];
-                        previous_dc = block[0];
-                    }
+                    // Step 2:
+                    // Do relative DC calculation, dequantization,
+                    // and inverse DCT component for component
+                    for component in scan_header.scan_components.iter() {
+                        let component_id = component.scan_component_selector;
+                        let component_index = component_index_from_id(component_id).expect("ERROR");
+                        let ref mut component_blocks = blocks[component_index];
 
-                    let image_blocks: Vec<Vec<u8>> = raw_image_blocks.iter()
-                        .map(|block| {
-                            block.iter()
+                        // TODO: This is really ugly looking..
+                        let quant_table_id = jfif_image.frame_header
+                            .as_ref()
+                            .unwrap()
+                            .quantization_table_id(component_id)
+                            .unwrap() as usize;
+                        let quant_table = jfif_image.quantization_tables[quant_table_id]
+                            .as_ref()
+                            .unwrap();
+
+                        let mut previous_dc = 0;
+                        for block in component_blocks.iter_mut() {
+                            // DC correction
+                            block[0] += previous_dc;
+                            previous_dc = block[0];
+
+                            // Dequantization, and convertion to f32
+                            let dequantized: Vec<f32> = block.iter()
                                 .zip(quant_table.iter())
-                                .map(|(&n, &q)| (q as i16) * n)
-                                .map(|i| i as f32)
-                        })
-                        .map(|block| {
-                            transform::discrete_cosine_transform_inverse(&block.collect())
-                        })
-                        .map(|block| {
-                            block.iter()
-                                .map(|&f| (f.round() + 128f32) as u8)
-                                .collect()
-                        })
-                        .enumerate()
-                        .map(|(i, b): (usize, Vec<u8>)| {
-                            println!("\nprint block #{}", i);
-                            print_vector_dec(b.iter());
-                            b
-                        })
-                        .collect();
+                                .map(|(&n, &q)| n as f32 * q as f32)
+                                .collect();
+
+                            let spatial_block =
+                                transform::discrete_cosine_transform_inverse(&dequantized);
+
+                            let color_values = spatial_block.iter()
+                                .map(|n| (n + 128f32).round() as u8);
+
+                            println!("hehe ");
+                            print_vector_dec(color_values);
+                            println!("hehe ");
+                        }
+                    }
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
