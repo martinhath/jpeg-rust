@@ -203,6 +203,59 @@ pub fn decode(ac_table: &Table,
         current.set(current.get() << scan_state.bits_read);
     }
 
+    let get_next_from_data = |i: usize| {
+        // Get the next `u8` from `data`
+        if i < last_index {
+            let res = data[i];
+            if res == 0xff {
+                if i + 1 < last_index {
+                    let marker = data[i + 1];
+                    if marker == 0 {
+                        index.set(index.get() + 1);
+                    } else {
+                        println!("Possible marker: found 0xff{:02x}", marker);
+                    }
+                }
+            }
+            res
+        } else {
+            let s = format!("{}/{}", i, last_index);
+            println!("An illegal index was asked for: {}", s);
+            let res = 0xaa;
+            println!("Defaulting to {:2x} ({:08b})", res, res);
+            res
+        }
+    };
+
+    let shift_and_fix_current = |n: usize| {
+        // Shift out the upper `n` bits of current,
+        // and update `index` and `bits_read`, reading
+        // additional data from `data` if needed.
+        current.set(current.get() << n);
+        bits_read.set(bits_read.get() + n);
+        // Maybe shift in new bits from `data`
+        while bits_read.get() >= 8 {
+            let next_n = get_next_from_data(index.get() as usize) as u32;
+            current.set(current.get() | next_n << (bits_read.get() - 8));
+            bits_read.set(bits_read.get() - 8);
+            index.set(index.get() + 1);
+        }
+    };
+
+    let read_n_bits = |n: u8| -> u32 {
+        // TODO: implement properly
+        if n > 16 {
+            panic!("`BIT_MASKS` needs to be larger!");
+            // If this is fixed, it is possible that we need to shift
+            // in additonal numbers from `data` as well.
+        }
+        let current16 = current.get() >> 16;
+        let mask = BIT_MASKS[n as usize] as u32;
+        let number: u32 = (current16 & mask) >> (16 - n);
+        shift_and_fix_current(n as usize);
+        number
+    };
+
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
         let mut current16 = ((current.get() & 0xffff0000) >> 16) as u16;
@@ -218,54 +271,12 @@ pub fn decode(ac_table: &Table,
                 if code == code_candidate {
                     // We found a valid code
                     let value = table.data_table[idu];
-                    current.set(current.get() << length);
-                    bits_read.set(bits_read.get() + length);
-
-                    // Maybe shift in new bits from `data`
-                    while bits_read.get() >= 8 {
-                        let next_n = {
-                            let next_index = index.get();
-                            if next_index >= last_index {
-                                // Might come here at the very end
-                                println!("WARN should probably not be here");
-                                0xaa
-                            } else {
-                                data[next_index]
-                            }
-                        } as u32;
-                        current.set(current.get() | next_n << (bits_read.get() - 8));
-
-                        bits_read.set(bits_read.get() - 8);
-                        index.set(index.get() + 1);
-                    }
+                    shift_and_fix_current(length);
                     return value;
                 }
             }
         }
         panic!("failed to find code for current: {:16b}", current16);
-    };
-    let read_n_bits = |n: u8| -> u32 {
-        // TODO: implement properly
-        if n > 16 {
-            panic!("`BIT_MASKS` needs to be larger!");
-            // If this is fixed, it is possible that we need to shift
-            // in additonal numbers from `data` as well.
-        }
-        let current16 = current.get() >> 16;
-        let mask = BIT_MASKS[n as usize] as u32;
-        let number: u32 = (current16 & mask) >> (16 - n);
-        current.set(current.get() << n);
-        bits_read.set(bits_read.get() + n as usize);
-        while bits_read.get() >= 8 {
-            let next_index = index.get();
-            if next_index >= last_index {
-                panic!("we're already at the end!!");
-            }
-            current.set(current.get() | (data[next_index] as u32) << (bits_read.get() - 8));
-            bits_read.set(bits_read.get() - 8);
-            index.set(index.get() + 1);
-        }
-        number
     };
 
     let dc_value_len = get_next_code(&dc_table);
