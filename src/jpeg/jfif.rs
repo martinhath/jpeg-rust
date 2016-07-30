@@ -116,11 +116,10 @@ struct ScanComponentHeader {
 
 impl FrameHeader {
     fn quantization_table_id(&self, component: u8) -> Option<u8> {
-        let res = self.frame_components
+        self.frame_components
             .iter()
             .find(|&comp_hdr| comp_hdr.component_id == component)
             .map(|ref comp_hdr| comp_hdr.quantization_selector);
-        res
     }
 }
 
@@ -133,6 +132,43 @@ impl ScanHeader {
     }
 }
 
+#[derive(Debug)]
+enum Marker {
+    // TODO: fill in these
+    StartOfScan,
+    DefineHuffmanTable,
+    Comment,
+    QuantizationTable,
+    BaselineDCT,
+    RestartIntervalDefinition,
+    ApplicationSegment12,
+    ApplicationSegment14,
+}
+
+fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
+    if data[0] != 0xff {
+        return None;
+    }
+    let mut n = data[1];
+    if n == 0 {
+        n = data[2];
+    }
+    use self::Marker::*;
+    println!("Testing {:02x}", n);
+    let marker = match n {
+        0xc0 => BaselineDCT,
+        0xc4 => DefineHuffmanTable,
+        0xda => StartOfScan,
+        0xdb => QuantizationTable,
+        0xdd => RestartIntervalDefinition,
+        0xec => ApplicationSegment12,
+        0xee => ApplicationSegment14,
+        0xfe => Comment,
+        _ => return None,
+    };
+    println!("Found marker {:?}", marker);
+    Some(marker)
+}
 
 #[allow(unused_variables)]
 impl JFIFImage {
@@ -176,417 +212,418 @@ impl JFIFImage {
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
 
         let mut i = 20;
-        while i < vec.len() {
+        'main_loop: while i < vec.len() {
             // All segments have a 2 byte length
             // right after the marker code
+            let marker = bytes_to_marker(&vec[i..]);
             let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
-            match (vec[i], vec[i + 1]) {
-                (0xff, 0xfe) => {
-                    // Comment
-                    use std::str;
-                    let comment: String = match str::from_utf8(&vec[i + 4..i + 4 + data_length]) {
-                        Ok(s) => s.to_string(),
-                        Err(e) => {
-                            println!("{}", e);
-                            "".to_string()
-                        }
-                    };
-                }
-                (0xff, 0xdb) => {
-                    // Quantization tables
-                    // JPEG B.2.4.1
 
-                    let mut index = i + 4;
-                    while index < i + 4 + data_length {
-                        let precision = (vec[index] & 0xf0) >> 4;
-                        let identifier = vec[index] & 0x0f;
-
-                        // TODO: we probably dont need to copy and collect here.
-                        // Would rather have a slice in quant_tables, with a
-                        // lifetime the same as jfif_image (?)
-                        let table: Vec<u8> = vec[index + 1..]
-                            .iter()
-                            .take(64)
-                            .map(|u| *u)
-                            .collect();
-                        jfif_image.quantization_tables[identifier as usize] = Some(table);
-                        index += 65; // 64 entries + one header byte
+            if let Some(marker) = marker {
+                match marker {
+                    Marker::Comment => {
+                        // Comment
+                        use std::str;
+                        let comment: String = match str::from_utf8(&vec[i + 4..i + 4 +
+                                                                               data_length]) {
+                            Ok(s) => s.to_string(),
+                            Err(e) => {
+                                println!("{}", e);
+                                "".to_string()
+                            }
+                        };
                     }
-                }
-                (0xff, 0xc0) => {
-                    // Baseline DCT
-                    // JPEG B.2.2
-                    let sample_precision = vec[i + 4];
-                    let num_lines = u8s_to_u16(&vec[i + 5..]);
-                    let samples_per_line = u8s_to_u16(&vec[i + 7..]);
-                    let image_components = vec[i + 9];
+                    Marker::QuantizationTable => {
+                        // Quantization tables
+                        // JPEG B.2.4.1
 
-                    let mut frame_components = Vec::with_capacity(image_components as usize);
-                    let mut index = i + 10;
-                    for component in 0..image_components {
-                        let component_id = vec[index];
-                        let horizontal_sampling_factor = (vec[index + 1] & 0xf0) >> 4;
-                        let vertical_sampling_factor = vec[index + 1] & 0x0f;
-                        let quantization_selector = vec[index + 2];
+                        let mut index = i + 4;
+                        while index < i + 4 + data_length {
+                            let precision = (vec[index] & 0xf0) >> 4;
+                            let identifier = vec[index] & 0x0f;
 
-                        frame_components.push(FrameComponentHeader {
-                            component_id: component_id,
-                            horizontal_sampling_factor: horizontal_sampling_factor,
-                            vertical_sampling_factor: vertical_sampling_factor,
-                            quantization_selector: quantization_selector,
-                        });
-                        index += 3;
-                    }
-                    let frame_header = FrameHeader {
-                        sample_precision: sample_precision,
-                        num_lines: num_lines,
-                        samples_per_line: samples_per_line,
-                        image_components: image_components,
-                        frame_components: frame_components,
-                    };
-                    jfif_image.frame_header = Some(frame_header)
-                }
-                (0xff, 0xc4) => {
-                    // Define Huffman table
-                    // JPEG B.2.4.2
-                    // DC = 0, AC = 1
-
-                    let mut huffman_index = i + 4;
-                    let target_index = i + data_length;
-                    // Read tables untill the segment is done
-
-                    while huffman_index < target_index {
-                        let table_class = (vec[huffman_index] & 0xf0) >> 4;
-                        let table_dest_id = vec[huffman_index] & 0x0f;
-                        huffman_index += 1;
-
-                        // There are `size_area[i]` number of codes of length `i + 1`.
-                        let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
-                        let number_of_codes = size_area.iter().fold(0u8, |a, b| a + *b) as usize;
-
-                        huffman_index += 16;
-                        // Code `i` has value `data_area[i]`
-                        let data_area: &[u8] = &vec[huffman_index..huffman_index + number_of_codes];
-                        huffman_index += number_of_codes;
-
-                        let huffman_table = huffman::Table::from_size_data_tables(size_area,
-                                                                                  data_area);
-                        println!("Huffman type {} dest {}", table_class, table_dest_id);
-                        huffman_table.print_table();
-                        if table_class == 0 {
-                            jfif_image.huffman_dc_tables[table_dest_id as usize] =
-                                Some(huffman_table);
-                        } else {
-                            jfif_image.huffman_ac_tables[table_dest_id as usize] =
-                                Some(huffman_table);
+                            // TODO: we probably dont need to copy and collect here.
+                            // Would rather have a slice in quant_tables, with a
+                            // lifetime the same as jfif_image (?)
+                            let table: Vec<u8> = vec[index + 1..]
+                                .iter()
+                                .take(64)
+                                .map(|u| *u)
+                                .collect();
+                            jfif_image.quantization_tables[identifier as usize] = Some(table);
+                            index += 65; // 64 entries + one header byte
                         }
                     }
-                }
-                (0xff, 0xda) => {
-                    // Start of Scan
-                    // JPEG B.2.3
+                    Marker::BaselineDCT => {
+                        // Baseline DCT
+                        // JPEG B.2.2
+                        let sample_precision = vec[i + 4];
+                        let num_lines = u8s_to_u16(&vec[i + 5..]);
+                        let samples_per_line = u8s_to_u16(&vec[i + 7..]);
+                        let image_components = vec[i + 9];
 
-                    let num_components = vec[i + 4];
-                    let mut scan_components = Vec::new();
-                    for component in 0..num_components {
-                        scan_components.push(ScanComponentHeader {
-                            scan_component_selector: vec[i + 5],
-                            dc_table_selector: (vec[i + 6] & 0xf0) >> 4,
-                            ac_table_selector: vec[i + 6] & 0x0f,
-                        });
-                        i += 2;
+                        let mut frame_components = Vec::with_capacity(image_components as usize);
+                        let mut index = i + 10;
+                        for component in 0..image_components {
+                            let component_id = vec[index];
+                            let horizontal_sampling_factor = (vec[index + 1] & 0xf0) >> 4;
+                            let vertical_sampling_factor = vec[index + 1] & 0x0f;
+                            let quantization_selector = vec[index + 2];
+
+                            frame_components.push(FrameComponentHeader {
+                                component_id: component_id,
+                                horizontal_sampling_factor: horizontal_sampling_factor,
+                                vertical_sampling_factor: vertical_sampling_factor,
+                                quantization_selector: quantization_selector,
+                            });
+                            index += 3;
+                        }
+                        let frame_header = FrameHeader {
+                            sample_precision: sample_precision,
+                            num_lines: num_lines,
+                            samples_per_line: samples_per_line,
+                            image_components: image_components,
+                            frame_components: frame_components,
+                        };
+                        jfif_image.dimensions = (samples_per_line, num_lines);
+                        jfif_image.frame_header = Some(frame_header)
                     }
+                    Marker::DefineHuffmanTable => {
+                        // Define Huffman table
+                        // JPEG B.2.4.2
+                        // DC = 0, AC = 1
 
-                    // TODO: Do we want to put the scan header in `FrameHeader`?
-                    // We don't need it for simple decoding, but it might be useful
-                    // if we want to print info (eg, all headers) for an image.
-                    let scan_header = ScanHeader {
-                        num_components: num_components,
-                        scan_components: scan_components,
-                        start_spectral_selection: vec[i + 5],
-                        end_spectral_selection: vec[i + 6],
-                        successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
-                        successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
-                    };
-                    println!("{:#?}", scan_header);
-                    i += 8;
-                    // `i` is now at the head of the data.
+                        let mut huffman_index = i + 4;
+                        let target_index = i + data_length;
+                        // Read tables untill the segment is done
 
-                    // Maybe reading components independently isn't a bad idea:
-                    //
-                    //  blocks = [[]], 2d one arr for each component
-                    //  for block in num_blocks {
-                    //      for component in components {
-                    //          get_headers(component_id)
-                    //          block = read_component()
-                    //          blocks[component_num].push(block)
-                    //      }
-                    //  }
+                        while huffman_index < target_index {
+                            let table_class = (vec[huffman_index] & 0xf0) >> 4;
+                            let table_dest_id = vec[huffman_index] & 0x0f;
+                            huffman_index += 1;
 
-                    // Map component_id to an index
-                    let component_index_from_id = {
-                        let mut map_component_to_i: Vec<u8> = scan_header.scan_components
+                            // There are `size_area[i]` number of codes of length `i + 1`.
+                            let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
+                            let number_of_codes =
+                                size_area.iter().fold(0u8, |a, b| a + *b) as usize;
+
+                            huffman_index += 16;
+                            // Code `i` has value `data_area[i]`
+                            let data_area: &[u8] = &vec[huffman_index..huffman_index +
+                                                                       number_of_codes];
+                            huffman_index += number_of_codes;
+
+                            let huffman_table = huffman::Table::from_size_data_tables(size_area,
+                                                                                      data_area);
+                            println!("Huffman type {} dest {}", table_class, table_dest_id);
+                            huffman_table.print_table();
+                            if table_class == 0 {
+                                jfif_image.huffman_dc_tables[table_dest_id as usize] =
+                                    Some(huffman_table);
+                            } else {
+                                jfif_image.huffman_ac_tables[table_dest_id as usize] =
+                                    Some(huffman_table);
+                            }
+                        }
+                    }
+                    Marker::StartOfScan => {
+                        // Start of Scan
+                        // JPEG B.2.3
+
+                        let num_components = vec[i + 4];
+                        let mut scan_components = Vec::new();
+                        for component in 0..num_components {
+                            scan_components.push(ScanComponentHeader {
+                                scan_component_selector: vec[i + 5],
+                                dc_table_selector: (vec[i + 6] & 0xf0) >> 4,
+                                ac_table_selector: vec[i + 6] & 0x0f,
+                            });
+                            i += 2;
+                        }
+
+                        // TODO: Do we want to put the scan header in `FrameHeader`?
+                        // We don't need it for simple decoding, but it might be useful
+                        // if we want to print info (eg, all headers) for an image.
+                        let scan_header = ScanHeader {
+                            num_components: num_components,
+                            scan_components: scan_components,
+                            start_spectral_selection: vec[i + 5],
+                            end_spectral_selection: vec[i + 6],
+                            successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
+                            successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
+                        };
+                        println!("{:#?}", scan_header);
+                        i += 8;
+                        // `i` is now at the head of the data.
+
+                        // Map component_id to an index
+                        let component_index_from_id = {
+                            let mut map_component_to_i: Vec<u8> = scan_header.scan_components
+                                .iter()
+                                .map(|c| c.scan_component_selector)
+                                .collect();
+                            move |component: u8| {
+                                map_component_to_i.iter()
+                                    .enumerate()
+                                    .find(|&(i, id)| *id == component)
+                                    .map(|(i, id)| i as usize)
+                            }
+                        };
+                        // Map index to component_id
+                        let component_ids: Vec<u8> = scan_header.scan_components
                             .iter()
                             .map(|c| c.scan_component_selector)
                             .collect();
-                        move |component: u8| {
-                            map_component_to_i.iter()
-                                .enumerate()
-                                .find(|&(i, id)| *id == component)
-                                .map(|(i, id)| i as usize)
-                        }
-                    };
-                    // Map index to component_id
-                    let component_ids: Vec<u8> = scan_header.scan_components
-                        .iter()
-                        .map(|c| c.scan_component_selector)
-                        .collect();
 
-                    // For each component, create a Vec to hold the decoded blocks
-                    let num_components = scan_header.num_components;
-                    let mut blocks: Vec<Vec<Vec<i16>>> =
-                        (0..num_components).map(|_| Vec::new()).collect();
+                        // For each component, create a Vec to hold the decoded blocks
+                        let num_components = scan_header.num_components;
+                        let mut blocks: Vec<Vec<Vec<i16>>> =
+                            (0..num_components).map(|_| Vec::new()).collect();
 
 
-                    // Step 1:
-                    // Read all blocks.
-                    let num_blocks_hori = 64;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let num_blocks_vert = 63;//(jfif_image.dimensions.1 + 7) / 8; // round up
-                    let num_blocks = num_blocks_hori * num_blocks_vert;
+                        // Step 1:
+                        // Read all blocks.
+                        let num_blocks_hori = (jfif_image.dimensions.0 as usize) / 8; // round up
+                        let num_blocks_vert = (jfif_image.dimensions.1 as usize) / 8; // round up
+                        let num_blocks = num_blocks_hori * num_blocks_vert;
 
-                    let mut scan_state = huffman::ScanState {
-                        index: 0,
-                        bits_read: 0,
-                    };
-                    for block_i in 0..num_blocks {
-                        // Assume interleaved
-                        for component in scan_header.scan_components.iter() {
-                            let component_id = component.scan_component_selector;
-
-                            // Get tables
-                            // TODO: Probably don't do this inside this loop.
-                            //       Would rather move it outside, and use lookup
-                            //       in here, with `component_id`.
-                            let scan_component_header: ScanComponentHeader =
-                                scan_header.scan_component_header(component_id)
-                                    .expect("ADD ERROR HANDLING");
-                            let ac_index = scan_component_header.ac_table_selector as usize;
-                            let ac_table = jfif_image.huffman_ac_tables[ac_index]
-                                .as_ref()
-                                .expect("ERROR FAIL xdd");
-                            let dc_index = scan_component_header.dc_table_selector as usize;
-                            let dc_table = jfif_image.huffman_dc_tables[dc_index]
-                                .as_ref()
-                                .expect("ERROR FAIL xdd");
-
-                            if block_i == 1077 {
-                                println!("{:?}", scan_state);
-                                print_vector(vec[i + scan_state.index..].iter());
-                            }
-
-                            let decoded =
-                                huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
-
-                            blocks[component_index_from_id(component_id).unwrap()].push(decoded);
-                        }
-                    }
-
-                    // Step 2:
-                    // Do relative DC calculation, dequantization,
-                    // and inverse DCT component for component
-                    for component in scan_header.scan_components.iter() {
-                        let component_id = component.scan_component_selector;
-                        let component_index = component_index_from_id(component_id).expect("ERROR");
-                        let ref mut component_blocks = blocks[component_index];
-
-                        // TODO: This is really ugly looking..
-                        let quant_table_id = jfif_image.frame_header
-                            .as_ref()
-                            .unwrap()
-                            .quantization_table_id(component_id)
-                            .unwrap() as usize;
-                        let quant_table = jfif_image.quantization_tables[quant_table_id]
-                            .as_ref()
-                            .unwrap();
-
-                        let mut new_component_blocks = Vec::new();
-                        let mut previous_dc = 0;
-                        let mut iteration = 0;
-                        let iter_inspect = 1077;
-                        for block in component_blocks.iter_mut() {
-                            iteration += 1;
-                            // DC correction
-                            block[0] += previous_dc;
-                            previous_dc = block[0];
-
-                            if iteration == iter_inspect {
-                                println!("Raw");
-                                print_vector_dec(block.iter());
-                            }
-
-                            let block = zigzag_inverse(block);
-                            if iteration == iter_inspect {
-                                println!("Back from zigzag");
-                                print_vector_dec(block.iter());
-                            }
-
-                            // Dequantization, and convertion to f32
-                            let dequantized: Vec<f32> = block.iter()
-                                .zip(quant_table.iter())
-                                .map(|(&n, &q)| n as f32 * q as f32)
-                                .collect();
-
-                            if iteration == iter_inspect {
-                                println!("dequantized");
-                                print_vector_dec(dequantized.iter());
-                            }
-
-                            let spatial_block =
-                                transform::discrete_cosine_transform_inverse(&dequantized);
-
-                            if iteration == iter_inspect {
-                                println!("spatial");
-                                print_vector_dec(spatial_block.iter());
-                            }
-
-                            let color_values: Vec<_> = spatial_block.iter()
-                                // Skip rounding due to YCbCr
-                                .map(|n| (n + 128f32).round() as i16)
-                                // .map(|n| n.round() as i16)
-                                .collect();
-
-                            if iteration == iter_inspect {
-                                println!("color values");
-                                print_vector_dec(color_values.iter());
-                            }
-
-                            if iteration == iter_inspect {
-                                new_component_blocks.push(repeat(0).take(64).collect());
-                                continue;
-                            }
-
-                            new_component_blocks.push(color_values);
-                            // println!("\n\n");
-                        }
-                        *component_blocks = new_component_blocks;
-                    }
-
-                    // Step 3:
-                    // Merge the components. For now, assume YCbCr, and
-                    // convert to RGB.
-
-                    let mut rgbBlocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
-                    if num_components == 3 {
-                        let clamp_to_u8 = |num| if num > 255.0 {
-                            255
-                        } else if num < 0.0 {
-                            0
-                        } else {
-                            num as u8
+                        let mut scan_state = huffman::ScanState {
+                            index: 0,
+                            bits_read: 0,
                         };
                         for block_i in 0..num_blocks {
-                            let ref y_block = blocks[0][block_i];
-                            let ref cb_block = blocks[1][block_i];
-                            let ref cr_block = blocks[2][block_i];
+                            // Assume interleaved
+                            println!("block {}/{}", block_i, num_blocks);
+                            for component in scan_header.scan_components.iter() {
+                                // // We might get control markers in the middle of the data:
+                                // let possible_marker = bytes_to_marker(&vec[i + scan_state.index..]);
+                                // if let Some(marker) = possible_marker {
+                                //     println!("Found marker in image data: {:?}", marker);
+                                //     i += scan_state.index;
+                                //     continue 'main_loop;
+                                // }
+                                let component_id = component.scan_component_selector;
 
-                            let c_red: f32 = 0.299;
-                            let c_green: f32 = 0.587;
-                            let c_blue: f32 = 0.114;
+                                // Get tables
+                                // TODO: Probably don't do this inside this loop.
+                                //       Would rather move it outside, and use lookup
+                                //       in here, with `component_id`.
+                                let scan_component_header: ScanComponentHeader =
+                                    scan_header.scan_component_header(component_id)
+                                        .expect("ADD ERROR HANDLING");
+                                let ac_index = scan_component_header.ac_table_selector as usize;
+                                let ac_table = jfif_image.huffman_ac_tables[ac_index]
+                                    .as_ref()
+                                    .expect("ERROR FAIL xdd");
+                                let dc_index = scan_component_header.dc_table_selector as usize;
+                                let dc_table = jfif_image.huffman_dc_tables[dc_index]
+                                    .as_ref()
+                                    .expect("ERROR FAIL xdd");
 
-                            let block: Vec<(u8, u8, u8)> = y_block.iter()
-                                .zip(cb_block.iter())
-                                .zip(cr_block.iter())
-                                .map(|((&y, &cb), &cr)| {
-                                    println!("ycrcb({}, {}, {})", y, cb, cr);
-                                    (y as f32, cb as f32, cr as f32)
-                                })
-                                // .map(|(y, cb, cr)| {
-                                //     let r = cr * (2.0 - 2.0 * c_red) + y;
-                                //     let b = cb * (2.0 - 2.0 * c_blue) + y;
-                                //     let g = (y - c_blue * b - c_red * r) / c_green;
-                                //     println!("rgb({}, {}, {})", r, g, b);
-                                //     (r, g, b)
-                                // })
-                                .map(|(r, g, b)| (clamp_to_u8(r), clamp_to_u8(g), clamp_to_u8(b)))
-                                .collect();
-                            rgbBlocks.push(block);
+                                let decoded =
+                                    huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
+                                println!("i={}/{}", i + scan_state.index, vec.len());
+
+                                blocks[component_index_from_id(component_id).unwrap()]
+                                    .push(decoded);
+                            }
                         }
-                    } else if num_components == 1 {
-                        let clamp_to_u8 = |num| if num > 255 {
-                            255
-                        } else if num < 0 {
-                            0
-                        } else {
-                            num as u8
-                        };
-                        for block in blocks[0].iter() {
-                            rgbBlocks.push(block.iter()
-                                .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
-                                .collect());
+
+                        // Step 2:
+                        // Do relative DC calculation, dequantization,
+                        // and inverse DCT component for component
+                        for component in scan_header.scan_components.iter() {
+                            let component_id = component.scan_component_selector;
+                            let component_index = component_index_from_id(component_id)
+                                .expect("ERROR");
+                            let ref mut component_blocks = blocks[component_index];
+
+                            // TODO: This is really ugly looking..
+                            let quant_table_id = jfif_image.frame_header
+                                .as_ref()
+                                .unwrap()
+                                .quantization_table_id(component_id)
+                                .unwrap() as usize;
+                            let quant_table = jfif_image.quantization_tables[quant_table_id]
+                                .as_ref()
+                                .unwrap();
+
+                            let mut new_component_blocks = Vec::new();
+                            let mut previous_dc = 0;
+                            let mut iteration = 0;
+                            let iter_inspect = 1077;
+                            for block in component_blocks.iter_mut() {
+                                iteration += 1;
+                                // DC correction
+                                block[0] += previous_dc;
+                                previous_dc = block[0];
+
+                                if iteration == iter_inspect {
+                                    println!("Raw");
+                                    print_vector_dec(block.iter());
+                                }
+
+                                let block = zigzag_inverse(block);
+                                if iteration == iter_inspect {
+                                    println!("Back from zigzag");
+                                    print_vector_dec(block.iter());
+                                }
+
+                                // Dequantization, and convertion to f32
+                                let dequantized: Vec<f32> = block.iter()
+                                    .zip(quant_table.iter())
+                                    .map(|(&n, &q)| n as f32 * q as f32)
+                                    .collect();
+
+                                if iteration == iter_inspect {
+                                    println!("dequantized");
+                                    print_vector_dec(dequantized.iter());
+                                }
+
+                                let spatial_block =
+                                    transform::discrete_cosine_transform_inverse(&dequantized);
+
+                                if iteration == iter_inspect {
+                                    println!("spatial");
+                                    print_vector_dec(spatial_block.iter());
+                                }
+
+                                let color_values: Vec<_> = spatial_block.iter()
+                                    // Skip rounding due to YCbCr
+                                    .map(|n| (n + 128f32).round() as i16)
+                                    .collect();
+
+                                if iteration == iter_inspect {
+                                    println!("color values");
+                                    print_vector_dec(color_values.iter());
+                                }
+
+                                if iteration == iter_inspect {
+                                    new_component_blocks.push(repeat(0).take(64).collect());
+                                    continue;
+                                }
+
+                                new_component_blocks.push(color_values);
+                                // println!("\n\n");
+                            }
+                            *component_blocks = new_component_blocks;
                         }
-                    }
 
-                    // Step 4:
-                    // Turn blocks into image lines, and put everything
-                    // into one large array.
+                        // Step 3:
+                        // Merge the components. For now, assume YCbCr, and
+                        // convert to RGB.
 
-                    let mut image_data: Vec<(u8, u8, u8)> = Vec::with_capacity(num_blocks * 64);
-                    for block_y in 0..num_blocks_vert {
-                        for line in 0..8 {
-                            for block_x in 0..num_blocks_hori {
-                                let block_index = num_blocks_hori * block_y + block_x;
-                                let ref block = rgbBlocks[block_index];
-                                for row in 0..8 {
-                                    let in_block_index = 8 * line + row;
-                                    image_data.push(block[in_block_index]);
+                        let mut rgbBlocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
+                        if num_components == 3 {
+                            let clamp_to_u8 = |num| if num > 255.0 {
+                                255
+                            } else if num < 0.0 {
+                                0
+                            } else {
+                                num as u8
+                            };
+                            for block_i in 0..num_blocks {
+                                let ref y_block = blocks[0][block_i];
+                                let ref cb_block = blocks[1][block_i];
+                                let ref cr_block = blocks[2][block_i];
+
+                                let c_red: f32 = 0.299;
+                                let c_green: f32 = 0.587;
+                                let c_blue: f32 = 0.114;
+
+                                let block: Vec<(u8, u8, u8)> = y_block.iter()
+                                    .zip(cb_block.iter())
+                                    .zip(cr_block.iter())
+                                    .map(|((&y, &cb), &cr)| {
+                                        println!("ycrcb({}, {}, {})", y, cb, cr);
+                                        (y as f32, cb as f32, cr as f32)
+                                    })
+                                    // .map(|(y, cb, cr)| {
+                                    //     let r = cr * (2.0 - 2.0 * c_red) + y;
+                                    //     let b = cb * (2.0 - 2.0 * c_blue) + y;
+                                    //     let g = (y - c_blue * b - c_red * r) / c_green;
+                                    //     println!("rgb({}, {}, {})", r, g, b);
+                                    //     (r, g, b)
+                                    // })
+                                    .map(|(r, g, b)| (clamp_to_u8(r), clamp_to_u8(g), clamp_to_u8(b)))
+                                    .collect();
+                                rgbBlocks.push(block);
+                            }
+                        } else if num_components == 1 {
+                            let clamp_to_u8 = |num| if num > 255 {
+                                255
+                            } else if num < 0 {
+                                0
+                            } else {
+                                num as u8
+                            };
+                            for block in blocks[0].iter() {
+                                rgbBlocks.push(block.iter()
+                                    .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
+                                    .collect());
+                            }
+                        }
+
+                        // Step 4:
+                        // Turn blocks into image lines, and put everything
+                        // into one large array.
+
+                        let mut image_data: Vec<(u8, u8, u8)> = Vec::with_capacity(num_blocks * 64);
+                        for block_y in 0..num_blocks_vert {
+                            for line in 0..8 {
+                                for block_x in 0..num_blocks_hori {
+                                    let block_index = num_blocks_hori * block_y + block_x;
+                                    let ref block = rgbBlocks[block_index];
+                                    for row in 0..8 {
+                                        let in_block_index = 8 * line + row;
+                                        image_data.push(block[in_block_index]);
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // Step 5:
-                    // Show the image, somehow.
+                        // Step 5:
+                        // Show the image, somehow.
 
-                    use std::fs::File;
-                    use std::io::Write;
-                    let mut file = File::create("output.ppm").unwrap();
-                    file.write(format!("P3\n{} {}\n255\n",
-                                       8 * num_blocks_hori,
-                                       8 * num_blocks_vert)
-                        .as_bytes());
-                    for &(r, g, b) in image_data.iter() {
-                        let s = format!("{} {} {}\n", r, g, b);
-                        file.write(s.as_bytes());
+                        use std::fs::File;
+                        use std::io::Write;
+                        let mut file = File::create("output.ppm").unwrap();
+                        file.write(format!("P3\n{} {}\n255\n",
+                                           8 * num_blocks_hori,
+                                           8 * num_blocks_vert)
+                            .as_bytes());
+                        for &(r, g, b) in image_data.iter() {
+                            let s = format!("{} {} {}\n", r, g, b);
+                            file.write(s.as_bytes());
+                        }
+                        println!("ending index={}", i + scan_state.index);
                     }
-                    println!("ending index={}", i + scan_state.index);
+                    Marker::RestartIntervalDefinition => {
+                        // Restart Interval Definition
+                        // JPEG B.2.4.4
+                        // TODO: support this
+                        panic!("got to restart interval def")
+                    }
+                    Marker::ApplicationSegment12 => {
+                        // Application segment 12
+                        // Not to be found in the standard?
+                        //
+                        //      http://wooyaggo.tistory.com/104
+                        //
+                        // TODO: should clear this up.
+                    }
+                    Marker::ApplicationSegment14 => {
+                        // Application segment 14
+                    }
                 }
-                (0xff, 0xdd) => {
-                    // Restart Interval Definition
-                    // JPEG B.2.4.4
-                    // TODO: support this
-                    panic!("got to restart interval def")
-                }
-                (0xff, 0xec) => {
-                    // Application segment 12
-                    // Not to be found in the standard?
-                    //
-                    //      http://wooyaggo.tistory.com/104
-                    //
-                    // TODO: should clear this up.
-                }
-                (0xff, 0xee) => {
-                    // Application segment 14
-                }
-                _ => {
-                    println!("\n\nUnhandled byte marker: {:02x} {:02x}",
-                             vec[i],
-                             vec[i + 1]);
-                    println!("i = {}", i);
-                    println!("Total vector len = {}", vec.len());
-                    println!("len={}", data_length);
-                    print_vector(vec.iter().skip(i));
-                    break;
-                }
+            } else {
+                println!("\n\nUnhandled byte marker: {:02x} {:02x}",
+                         vec[i],
+                         vec[i + 1]);
+                println!("i = {}", i);
+                println!("Total vector len = {}", vec.len());
+                println!("len={}", data_length);
+                print_vector(vec.iter().skip(i));
+                break;
             }
             i += 4 + data_length;
         }
