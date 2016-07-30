@@ -212,11 +212,6 @@ pub fn decode(ac_table: &Table,
             let mask = BIT_MASKS[length];
             let code_candidate: u16 = ((current16 & mask) >> (16 - length)) as u16;
 
-            if current16 == 65451 {
-                println!("trying length={}", length);
-                println!("there are {} codes of that length\n",
-                         table.code_vecs[length - 1].len());
-            }
             for &id in table.code_vecs[length - 1].iter() {
                 let idu = id as usize;
                 let code = table.code_table[idu];
@@ -287,7 +282,7 @@ pub fn decode(ac_table: &Table,
             panic!("wtf");
         }
         let next_code = get_next_code(&ac_table);
-        if next_code == 0 {
+        if next_code == 0x00 {
             result.extend(repeat(0).take(64 - n_pushed));
             break;
         }
@@ -299,11 +294,13 @@ pub fn decode(ac_table: &Table,
         }
 
         let zeroes = ((next_code & 0xf0) >> 4) as usize;
-        let num = next_code & 0x0f;
+        let num_length = next_code & 0x0f;
+        let num_bits = read_n_bits(num_length);
+        let num = dc_value_from_len_bits(num_length, num_bits);
         for _ in 0..min(zeroes, 64 - n_pushed - 1) {
             result.push(0)
         }
-        result.push(num as i16);
+        result.push(num);
         n_pushed += (zeroes as usize) + 1;
     }
 
@@ -323,7 +320,7 @@ pub fn decode(ac_table: &Table,
 }
 
 fn dc_value_from_len_bits(len: u8, bits: u32) -> i16 {
-    // TODO: find out where this is in the standard.
+    // See Table F.2
     if len == 0 {
         return 0;
     }

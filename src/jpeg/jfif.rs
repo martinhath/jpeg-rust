@@ -271,7 +271,7 @@ impl JFIFImage {
 
                         let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                   data_area);
-                        println!("huffman table {}, {}", table_dest_id, table_class);
+                        println!("Huffman type {} dest {}", table_class, table_dest_id);
                         huffman_table.print_table();
                         if table_class == 0 {
                             jfif_image.huffman_dc_tables[table_dest_id as usize] =
@@ -308,6 +308,7 @@ impl JFIFImage {
                         successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                         successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                     };
+                    println!("{:#?}", scan_header);
                     i += 8;
                     // `i` is now at the head of the data.
 
@@ -349,8 +350,8 @@ impl JFIFImage {
 
                     // Step 1:
                     // Read all blocks.
-                    let num_blocks_hori = 16;//(jfif_image.dimensions.0 + 7) / 8; // round up
-                    let num_blocks_vert = 16;//(jfif_image.dimensions.1 + 7) / 8; // round up
+                    let num_blocks_hori = 64;//(jfif_image.dimensions.0 + 7) / 8; // round up
+                    let num_blocks_vert = 63;//(jfif_image.dimensions.1 + 7) / 8; // round up
                     let num_blocks = num_blocks_hori * num_blocks_vert;
 
                     let mut scan_state = huffman::ScanState {
@@ -358,6 +359,7 @@ impl JFIFImage {
                         bits_read: 0,
                     };
                     for block_i in 0..num_blocks {
+                        // Assume interleaved
                         for component in scan_header.scan_components.iter() {
                             let component_id = component.scan_component_selector;
 
@@ -377,11 +379,13 @@ impl JFIFImage {
                                 .as_ref()
                                 .expect("ERROR FAIL xdd");
 
+                            if block_i == 1077 {
+                                println!("{:?}", scan_state);
+                                print_vector(vec[i + scan_state.index..].iter());
+                            }
+
                             let decoded =
                                 huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
-                            if decoded.len() != 64 {
-                                panic!("length should be 64!!")
-                            }
 
                             blocks[component_index_from_id(component_id).unwrap()].push(decoded);
                         }
@@ -407,10 +411,24 @@ impl JFIFImage {
 
                         let mut new_component_blocks = Vec::new();
                         let mut previous_dc = 0;
+                        let mut iteration = 0;
+                        let iter_inspect = 1077;
                         for block in component_blocks.iter_mut() {
+                            iteration += 1;
                             // DC correction
                             block[0] += previous_dc;
                             previous_dc = block[0];
+
+                            if iteration == iter_inspect {
+                                println!("Raw");
+                                print_vector_dec(block.iter());
+                            }
+
+                            let block = zigzag_inverse(block);
+                            if iteration == iter_inspect {
+                                println!("Back from zigzag");
+                                print_vector_dec(block.iter());
+                            }
 
                             // Dequantization, and convertion to f32
                             let dequantized: Vec<f32> = block.iter()
@@ -418,14 +436,37 @@ impl JFIFImage {
                                 .map(|(&n, &q)| n as f32 * q as f32)
                                 .collect();
 
+                            if iteration == iter_inspect {
+                                println!("dequantized");
+                                print_vector_dec(dequantized.iter());
+                            }
+
                             let spatial_block =
                                 transform::discrete_cosine_transform_inverse(&dequantized);
 
+                            if iteration == iter_inspect {
+                                println!("spatial");
+                                print_vector_dec(spatial_block.iter());
+                            }
+
                             let color_values: Vec<_> = spatial_block.iter()
+                                // Skip rounding due to YCbCr
                                 .map(|n| (n + 128f32).round() as i16)
+                                // .map(|n| n.round() as i16)
                                 .collect();
 
+                            if iteration == iter_inspect {
+                                println!("color values");
+                                print_vector_dec(color_values.iter());
+                            }
+
+                            if iteration == iter_inspect {
+                                new_component_blocks.push(repeat(0).take(64).collect());
+                                continue;
+                            }
+
                             new_component_blocks.push(color_values);
+                            // println!("\n\n");
                         }
                         *component_blocks = new_component_blocks;
                     }
@@ -433,52 +474,91 @@ impl JFIFImage {
                     // Step 3:
                     // Merge the components. For now, assume YCbCr, and
                     // convert to RGB.
-                    if num_components != 3 {
-                        panic!("convert from greyscale to rgb");
-                    }
+
                     let mut rgbBlocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
-                    for block_i in 0..num_blocks {
-                        let ref y_block = blocks[0][block_i];
-                        let ref cb_block = blocks[1][block_i];
-                        let ref cr_block = blocks[2][block_i];
+                    if num_components == 3 {
+                        let clamp_to_u8 = |num| if num > 255.0 {
+                            255
+                        } else if num < 0.0 {
+                            0
+                        } else {
+                            num as u8
+                        };
+                        for block_i in 0..num_blocks {
+                            let ref y_block = blocks[0][block_i];
+                            let ref cb_block = blocks[1][block_i];
+                            let ref cr_block = blocks[2][block_i];
 
-                        let c_red: f32 = 0.299;
-                        let c_green: f32 = 0.587;
-                        let c_blue: f32 = 0.114;
+                            let c_red: f32 = 0.299;
+                            let c_green: f32 = 0.587;
+                            let c_blue: f32 = 0.114;
 
-                        let block: Vec<(u8, u8, u8)> = y_block.iter()
-                            .zip(cb_block.iter())
-                            .zip(cr_block.iter())
-                            .map(|((&y, &cb), &cr)| (y as u8, cb as u8, cr as u8))
-                            // .map(|(y, cb, cr)| {
-                            //     println!("YCbCR=({}, {}, {})", y, cb, cr);
-                            //     let r: u8 = cr * ((2.0 - 2.0 * c_red) as u8) + y;
-                            //     let g: u8 = cb * ((2.0 - 2.0 * c_blue) as u8) + y;
-                            //     let b: u8 = {
-                            //         let yf = y as f32;
-                            //         let cbf = cb as f32;
-                            //         let crf = cr as f32;
-                            //         ((yf - c_blue * cbf - c_red * crf) / c_green) as u8
-                            //     };
-                            //     println!("RGB=({}. {}, {})", r, g, b);
-                            //     (r, g, b)
-                            // })
-                            .collect();
-                        rgbBlocks.push(block);
+                            let block: Vec<(u8, u8, u8)> = y_block.iter()
+                                .zip(cb_block.iter())
+                                .zip(cr_block.iter())
+                                .map(|((&y, &cb), &cr)| {
+                                    println!("ycrcb({}, {}, {})", y, cb, cr);
+                                    (y as f32, cb as f32, cr as f32)
+                                })
+                                // .map(|(y, cb, cr)| {
+                                //     let r = cr * (2.0 - 2.0 * c_red) + y;
+                                //     let b = cb * (2.0 - 2.0 * c_blue) + y;
+                                //     let g = (y - c_blue * b - c_red * r) / c_green;
+                                //     println!("rgb({}, {}, {})", r, g, b);
+                                //     (r, g, b)
+                                // })
+                                .map(|(r, g, b)| (clamp_to_u8(r), clamp_to_u8(g), clamp_to_u8(b)))
+                                .collect();
+                            rgbBlocks.push(block);
+                        }
+                    } else if num_components == 1 {
+                        let clamp_to_u8 = |num| if num > 255 {
+                            255
+                        } else if num < 0 {
+                            0
+                        } else {
+                            num as u8
+                        };
+                        for block in blocks[0].iter() {
+                            rgbBlocks.push(block.iter()
+                                .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
+                                .collect());
+                        }
                     }
+
+                    // Step 4:
+                    // Turn blocks into image lines, and put everything
+                    // into one large array.
+
+                    let mut image_data: Vec<(u8, u8, u8)> = Vec::with_capacity(num_blocks * 64);
+                    for block_y in 0..num_blocks_vert {
+                        for line in 0..8 {
+                            for block_x in 0..num_blocks_hori {
+                                let block_index = num_blocks_hori * block_y + block_x;
+                                let ref block = rgbBlocks[block_index];
+                                for row in 0..8 {
+                                    let in_block_index = 8 * line + row;
+                                    image_data.push(block[in_block_index]);
+                                }
+                            }
+                        }
+                    }
+
+                    // Step 5:
+                    // Show the image, somehow.
 
                     use std::fs::File;
                     use std::io::Write;
                     let mut file = File::create("output.ppm").unwrap();
-                    file.write(b"P6\n128 128\n255\n");
-                    for block in rgbBlocks.iter() {
-                        for &(r, g, b) in block {
-                            println!("{:3},{:3},{:3}", r, g, b);
-                            file.write(&[r, g, b]);
-                        }
+                    file.write(format!("P3\n{} {}\n255\n",
+                                       8 * num_blocks_hori,
+                                       8 * num_blocks_vert)
+                        .as_bytes());
+                    for &(r, g, b) in image_data.iter() {
+                        let s = format!("{} {} {}\n", r, g, b);
+                        file.write(s.as_bytes());
                     }
-
-
+                    println!("ending index={}", i + scan_state.index);
                 }
                 (0xff, 0xdd) => {
                     // Restart Interval Definition
@@ -559,7 +639,7 @@ fn print_vector_dec<I>(iter: I)
     let mut i = 0;
     for byte in iter.take(64) {
         i += 1;
-        print!("{:3} ", byte);
+        print!("{:8.2} ", byte);
         if i % 8 == 0 && i != 0 {
             print!("\n");
         }
@@ -585,22 +665,40 @@ fn print_vector_dec<I>(iter: I)
 ///  9 10 14 15
 /// ```
 ///
+// hardcode dis shit lol
+const indices: [usize; 64] = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26,
+                              33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56,
+                              57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38,
+                              31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 53];
 #[allow(dead_code)]
-fn zigzag<T>(vec: Vec<T>) -> Vec<T>
+fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
     where T: Copy
 {
     if vec.len() != 64 {
         panic!("I took a shortcut in zigzag()! Please implement me properly :) (len={})",
                vec.len());
     }
-    // hardcode dis shit lol
-    let indices = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48,
-                   41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22,
-                   15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55,
-                   62, 53];
     let mut res = Vec::with_capacity(64);
     for &i in indices.iter() {
         res.push(vec[i]);
+    }
+    res
+}
+
+use std::iter::repeat;
+
+#[allow(dead_code)]
+fn zigzag_inverse<T>(vec: &Vec<T>) -> Vec<T>
+    where T: Copy,
+          T: Default
+{
+    if vec.len() != 64 {
+        panic!("I took a shortcut in zigzag()! Please implement me properly :) (len={})",
+               vec.len());
+    }
+    let mut res: Vec<T> = repeat(Default::default()).take(64).collect();
+    for (i, &n) in indices.iter().enumerate() {
+        res[n] = vec[i];
     }
     res
 }
