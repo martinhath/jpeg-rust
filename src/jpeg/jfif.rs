@@ -316,8 +316,8 @@ impl JFIFImage {
 
                             let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                       data_area);
-                            // println!("Huffman type {} dest {}", table_class, table_dest_id);
-                            // huffman_table.print_table();
+                            println!("Huffman type {} dest {}", table_class, table_dest_id);
+                            huffman_table.print_table();
 
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =
@@ -482,18 +482,28 @@ impl JFIFImage {
                                     println!("Raw");
                                     print_vector_dec(block.iter());
                                 }
+                                if false && iteration == iter_inspect {
+                                    let replace = 15;
+                                    let replace_i = 0;
+                                    println!("Replace {} with {}", block[replace_i], replace);
+                                    block[replace_i] = replace;
+                                }
 
-                                let block = zigzag_inverse(block);
                                 if iteration == iter_inspect {
                                     println!("Back from zigzag");
                                     print_vector_dec(block.iter());
                                 }
 
                                 // Dequantization, and convertion to f32
+                                // We do this before `zigzag_inverse`, because
+                                // the read quantization table is also zigzag.
                                 let dequantized: Vec<f32> = block.iter()
                                     .zip(quant_table.iter())
                                     .map(|(&n, &q)| n as f32 * q as f32)
                                     .collect();
+
+                                // TODO: Dequantization could take an iterator.
+                                let dequantized = zigzag_inverse(&dequantized);
 
                                 if iteration == iter_inspect {
                                     println!("dequantized");
@@ -519,12 +529,10 @@ impl JFIFImage {
                                 }
 
                                 iteration += 1;
-                                if iteration == iter_inspect {
-                                    new_component_blocks.push(repeat(0).take(64).collect());
-                                    continue;
-                                } else {
-                                    new_component_blocks.push(color_values);
-                                }
+                                // if iteration == iter_inspect {
+                                //     new_component_blocks.push(repeat(0).take(64).collect());
+                                // }
+                                new_component_blocks.push(color_values);
                             }
                             *component_blocks = new_component_blocks;
                         }
@@ -616,7 +624,7 @@ impl JFIFImage {
                             let s = format!("{} {} {}\n", r, g, b);
                             file.write(s.as_bytes());
                         }
-                        println!("ending index={}", i + scan_state.index);
+                        println!("ending index={}/{}", i + scan_state.index, vec.len());
                     }
                     Marker::RestartIntervalDefinition => {
                         // Restart Interval Definition

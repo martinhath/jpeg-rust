@@ -282,8 +282,11 @@ pub fn decode(ac_table: &Table,
                 }
             }
         }
+        println!("failed to find code for current: {:16b} (index: {}/{})",
+                 current16,
+                 index.get(),
+                 last_index);
         0
-        // panic!("failed to find code for current: {:16b}", current16);
     };
 
     let dc_value_len = get_next_code(&dc_table);
