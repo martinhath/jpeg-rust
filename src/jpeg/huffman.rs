@@ -115,6 +115,7 @@ impl Table {
         codes
     }
 
+    #[allow(dead_code)]
     pub fn print_table(&self) {
         for (i, ref vec) in self.code_vecs.iter().enumerate() {
             let len = i + 1;

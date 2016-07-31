@@ -182,9 +182,9 @@ impl JFIFImage {
         if vec.len() < 11 {
             return Err("input is too short".to_string());
         }
-        let SOI = 0xd8;
-        let APP0 = 0xe0;
-        if vec[0] != 0xff || vec[1] != SOI || vec[2] != 0xff || vec[3] != APP0 ||
+        let soi = 0xd8;
+        let app_0 = 0xe0;
+        if vec[0] != 0xff || vec[1] != soi || vec[2] != 0xff || vec[3] != app_0 ||
            vec[6] != 'J' as u8 || vec[7] != 'F' as u8 || vec[8] != 'I' as u8 ||
            vec[9] != 'F' as u8 || vec[10] != 0x00 {
             return Err("Header mismatch".to_string());
@@ -367,7 +367,7 @@ impl JFIFImage {
 
 
                         // Try to find a marker:
-                        let EOS_index = {
+                        let eos_index = {
                             let mut index = i;
                             while index < vec.len() - 1 {
                                 let ff = vec[index];
@@ -384,10 +384,11 @@ impl JFIFImage {
                             index
                         };
 
+                        // Copy data, and replace 0xff00 with 0xff.
                         let mut encoded_data = Vec::new();
                         {
                             let mut i = i;
-                            while i < EOS_index {
+                            while i < eos_index {
                                 encoded_data.push(vec[i]);
                                 if vec[i] == 0xff && vec[i + 1] == 0x00 {
                                     // Skip the 0x00 part here.
@@ -400,7 +401,7 @@ impl JFIFImage {
 
                         // Map component_id to an index
                         let component_index_from_id = {
-                            let mut map_component_to_i: Vec<u8> = scan_header.scan_components
+                            let map_component_to_i: Vec<u8> = scan_header.scan_components
                                 .iter()
                                 .map(|c| c.component_id)
                                 .collect();
@@ -527,7 +528,7 @@ impl JFIFImage {
                         // Merge the components. For now, assume YCbCr, and
                         // convert to RGB.
 
-                        let mut rgbBlocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
+                        let mut rgb_blocks: Vec<Vec<(u8, u8, u8)>> = Vec::new();
                         if num_components == 3 {
                             let clamp_to_u8 = |num| if num > 255.0 {
                                 255
@@ -560,7 +561,7 @@ impl JFIFImage {
                                     // })
                                     .map(|(r, g, b)| (clamp_to_u8(r), clamp_to_u8(g), clamp_to_u8(b)))
                                     .collect();
-                                rgbBlocks.push(block);
+                                rgb_blocks.push(block);
                             }
                         } else if num_components == 1 {
                             let clamp_to_u8 = |num| if num > 255 {
@@ -571,7 +572,7 @@ impl JFIFImage {
                                 num as u8
                             };
                             for block in blocks[0].iter() {
-                                rgbBlocks.push(block.iter()
+                                rgb_blocks.push(block.iter()
                                     .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
                                     .collect());
                             }
@@ -586,7 +587,7 @@ impl JFIFImage {
                             for line in 0..8 {
                                 for block_x in 0..num_blocks_hori {
                                     let block_index = num_blocks_hori * block_y + block_x;
-                                    let ref block = rgbBlocks[block_index];
+                                    let ref block = rgb_blocks[block_index];
                                     for row in 0..8 {
                                         let in_block_index = 8 * line + row;
                                         image_data.push(block[in_block_index]);
@@ -601,13 +602,13 @@ impl JFIFImage {
                         use std::fs::File;
                         use std::io::Write;
                         let mut file = File::create("output.ppm").unwrap();
-                        file.write(format!("P3\n{} {}\n255\n",
-                                           8 * num_blocks_hori,
-                                           8 * num_blocks_vert)
+                        let _ = file.write(format!("P3\n{} {}\n255\n",
+                                                   8 * num_blocks_hori,
+                                                   8 * num_blocks_vert)
                             .as_bytes());
                         for &(r, g, b) in image_data.iter() {
                             let s = format!("{} {} {}\n", r, g, b);
-                            file.write(s.as_bytes());
+                            let _ = file.write(s.as_bytes());
                         }
                     }
                     Marker::RestartIntervalDefinition => {
@@ -648,6 +649,7 @@ impl JFIFImage {
 
 // TODO: Remove (or move?)
 use std::fmt::LowerHex;
+#[allow(dead_code)]
 fn print_vector<I>(iter: I)
     where I: Iterator,
           I::Item: LowerHex
@@ -666,6 +668,7 @@ fn print_vector<I>(iter: I)
 }
 
 use std::fmt::Binary;
+#[allow(dead_code)]
 fn print_vector_bin<I>(iter: I)
     where I: Iterator,
           I::Item: Binary
@@ -684,6 +687,7 @@ fn print_vector_bin<I>(iter: I)
 }
 
 use std::fmt::Display;
+#[allow(dead_code)]
 fn print_vector_dec<I>(iter: I)
     where I: Iterator,
           I::Item: Display
@@ -718,10 +722,10 @@ fn print_vector_dec<I>(iter: I)
 /// ```
 ///
 // hardcode dis shit lol
-const indices: [usize; 64] = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26,
-                              33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56,
-                              57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38,
-                              31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
+const ZIGZAG_INDICES: [usize; 64] =
+    [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27,
+     20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58,
+     59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
 #[allow(dead_code)]
 fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
     where T: Copy
@@ -731,7 +735,7 @@ fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
                vec.len());
     }
     let mut res = Vec::with_capacity(64);
-    for &i in indices.iter() {
+    for &i in ZIGZAG_INDICES.iter() {
         res.push(vec[i]);
     }
     res
@@ -747,7 +751,7 @@ fn zigzag_inverse<T>(vec: &Vec<T>) -> Vec<T>
                vec.len());
     }
     let mut res: Vec<T> = repeat(Default::default()).take(64).collect();
-    for (i, &n) in indices.iter().enumerate() {
+    for (i, &n) in ZIGZAG_INDICES.iter().enumerate() {
         res[n] = vec[i];
     }
     res
