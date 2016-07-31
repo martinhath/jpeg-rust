@@ -161,6 +161,12 @@ pub fn decode(ac_table: &Table,
     //       we will have non scan data in `current`.
     // TODO: naming - this is first illegal index.
     let last_index = data.len();
+    println!("[] {:?}", scan_state);
+    print!("[] ");
+    for n in data.iter().skip(scan_state.index).take(8) {
+        print!("{:02x} ", n);
+    }
+    println!("");
 
     // Need to check data[0-4] for 0xff bytes.
     // We might skip some bytes (eg when 0xff 0x00),
@@ -204,33 +210,6 @@ pub fn decode(ac_table: &Table,
         current.set(new_current);
     }
 
-    let get_next_from_data = |i: usize| {
-        // Get the next `u8` from `data`
-        if i < last_index {
-            let res = data[i];
-            if res == 0xff {
-                if i + 1 < last_index {
-                    let marker = data[i + 1];
-                    if marker == 0x00 {
-                        // index.set(index.get() + 1);
-                    } else {
-                        // TODO: Somehow either signal from here that we are at
-                        // the end, or search for EoI before calling this function,
-                        // and only pass the data slice (so we're out of bounds here).
-                        println!("Possible marker: found 0xff{:02x} (index={})", marker, i);
-                    }
-                }
-            }
-            res
-        } else {
-            let s = format!("{}/{}", i, last_index);
-            // println!("An illegal index was asked for: {}", s);
-            let res = 0xaa;
-            // println!("Defaulting to {:2x} ({:08b})", res, res);
-            res
-        }
-    };
-
     let shift_and_fix_current = |n: usize| {
         // Shift out the upper `n` bits of current,
         // and update `index` and `bits_read`, reading
@@ -239,14 +218,17 @@ pub fn decode(ac_table: &Table,
         bits_read.set(bits_read.get() + n);
         // Maybe shift in new bits from `data`
         while bits_read.get() >= 8 {
-            let next_n = get_next_from_data(index.get() as usize) as u32;
+            let i = index.get() as usize;
+            let next_n = if i < last_index {
+                data[i]
+            } else {
+                0xaa
+            } as u32;
             current.set(current.get() | next_n << (bits_read.get() - 8));
             bits_read.set(bits_read.get() - 8);
             index.set(index.get() + 1);
         }
     };
-
-    // println!("current: {:032b}", current.get());
 
     let read_n_bits = |n: u8| -> u32 {
         // TODO: implement properly
@@ -292,7 +274,6 @@ pub fn decode(ac_table: &Table,
     let dc_value_len = get_next_code(&dc_table);
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
-    // println!("\tDC cof = {}", dc_cof);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);
