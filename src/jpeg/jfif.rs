@@ -1,3 +1,5 @@
+use std::iter::repeat;
+
 use jpeg::huffman;
 use ::transform;
 
@@ -109,8 +111,11 @@ struct ScanHeader {
 
 #[derive(Debug, Clone)]
 struct ScanComponentHeader {
-    scan_component_selector: u8,
+    /// Component id
+    component_id: u8,
+    /// Which DC huffman table the component uses
     dc_table_selector: u8,
+    /// Which AC huffman table the component uses
     ac_table_selector: u8,
 }
 
@@ -119,7 +124,7 @@ impl FrameHeader {
         self.frame_components
             .iter()
             .find(|&comp_hdr| comp_hdr.component_id == component)
-            .map(|ref comp_hdr| comp_hdr.quantization_selector);
+            .map(|ref comp_hdr| comp_hdr.quantization_selector)
     }
 }
 
@@ -127,7 +132,7 @@ impl ScanHeader {
     fn scan_component_header(&self, component: u8) -> Option<ScanComponentHeader> {
         self.scan_components
             .iter()
-            .find(|sch| sch.scan_component_selector == component)
+            .find(|sch| sch.component_id == component)
             .map(|sch| sch.clone())
     }
 }
@@ -154,7 +159,6 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
         n = data[2];
     }
     use self::Marker::*;
-    println!("Testing {:02x}", n);
     let marker = match n {
         0xc0 => BaselineDCT,
         0xc4 => DefineHuffmanTable,
@@ -166,7 +170,6 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
         0xfe => Comment,
         _ => return None,
     };
-    println!("Found marker {:?}", marker);
     Some(marker)
 }
 
@@ -195,7 +198,6 @@ impl JFIFImage {
         let thumbnail_dimensions = (vec[18], vec[19]);
 
         // TODO: thumbnail data?
-        // let n = thumbnail_dimensions.0 as usize * thumbnail_dimensions.1 as usize;
 
         let mut jfif_image = JFIFImage {
             version: version,
@@ -314,8 +316,9 @@ impl JFIFImage {
 
                             let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                       data_area);
-                            println!("Huffman type {} dest {}", table_class, table_dest_id);
-                            huffman_table.print_table();
+                            // println!("Huffman type {} dest {}", table_class, table_dest_id);
+                            // huffman_table.print_table();
+
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                     Some(huffman_table);
@@ -333,7 +336,7 @@ impl JFIFImage {
                         let mut scan_components = Vec::new();
                         for component in 0..num_components {
                             scan_components.push(ScanComponentHeader {
-                                scan_component_selector: vec[i + 5],
+                                component_id: vec[i + 5],
                                 dc_table_selector: (vec[i + 6] & 0xf0) >> 4,
                                 ac_table_selector: vec[i + 6] & 0x0f,
                             });
@@ -355,11 +358,28 @@ impl JFIFImage {
                         i += 8;
                         // `i` is now at the head of the data.
 
+
+                        // // Try to find a marker:
+                        // {
+                        //     let mut index = i;
+                        //     while index < vec.len() - 1 {
+                        //         let ff = vec[index];
+                        //         let marker = vec[index + 1];
+                        //         if ff == 0xff && marker != 0x00 {
+                        //             println!("Found marker at index {} : 0xff{:02x}",
+                        //                      index,
+                        //                      marker);
+                        //         }
+                        //         index += 1;
+                        //     }
+                        // }
+                        // break 'main_loop;
+
                         // Map component_id to an index
                         let component_index_from_id = {
                             let mut map_component_to_i: Vec<u8> = scan_header.scan_components
                                 .iter()
-                                .map(|c| c.scan_component_selector)
+                                .map(|c| c.component_id)
                                 .collect();
                             move |component: u8| {
                                 map_component_to_i.iter()
@@ -371,7 +391,7 @@ impl JFIFImage {
                         // Map index to component_id
                         let component_ids: Vec<u8> = scan_header.scan_components
                             .iter()
-                            .map(|c| c.scan_component_selector)
+                            .map(|c| c.component_id)
                             .collect();
 
                         // For each component, create a Vec to hold the decoded blocks
@@ -390,18 +410,12 @@ impl JFIFImage {
                             index: 0,
                             bits_read: 0,
                         };
+                        let iter_inspect = 477;
                         for block_i in 0..num_blocks {
                             // Assume interleaved
-                            println!("block {}/{}", block_i, num_blocks);
+                            // println!("block {}/{}", block_i, num_blocks);
                             for component in scan_header.scan_components.iter() {
-                                // // We might get control markers in the middle of the data:
-                                // let possible_marker = bytes_to_marker(&vec[i + scan_state.index..]);
-                                // if let Some(marker) = possible_marker {
-                                //     println!("Found marker in image data: {:?}", marker);
-                                //     i += scan_state.index;
-                                //     continue 'main_loop;
-                                // }
-                                let component_id = component.scan_component_selector;
+                                let component_id = component.component_id;
 
                                 // Get tables
                                 // TODO: Probably don't do this inside this loop.
@@ -419,9 +433,15 @@ impl JFIFImage {
                                     .as_ref()
                                     .expect("ERROR FAIL xdd");
 
+                                if block_i == iter_inspect {
+                                    let index = i + scan_state.index;
+                                    println!("{:?}", scan_state);
+                                    print_vector(vec[index..].iter());
+                                }
+
                                 let decoded =
                                     huffman::decode(ac_table, dc_table, &vec[i..], &mut scan_state);
-                                println!("i={}/{}", i + scan_state.index, vec.len());
+                                // println!("i={}/{}", i + scan_state.index, vec.len());
 
                                 blocks[component_index_from_id(component_id).unwrap()]
                                     .push(decoded);
@@ -432,7 +452,7 @@ impl JFIFImage {
                         // Do relative DC calculation, dequantization,
                         // and inverse DCT component for component
                         for component in scan_header.scan_components.iter() {
-                            let component_id = component.scan_component_selector;
+                            let component_id = component.component_id;
                             let component_index = component_index_from_id(component_id)
                                 .expect("ERROR");
                             let ref mut component_blocks = blocks[component_index];
@@ -450,12 +470,13 @@ impl JFIFImage {
                             let mut new_component_blocks = Vec::new();
                             let mut previous_dc = 0;
                             let mut iteration = 0;
-                            let iter_inspect = 1077;
                             for block in component_blocks.iter_mut() {
-                                iteration += 1;
                                 // DC correction
-                                block[0] += previous_dc;
-                                previous_dc = block[0];
+                                let encoded = block[0];
+                                let decoded = encoded + previous_dc;
+                                previous_dc = decoded;
+                                block[0] = decoded;
+
 
                                 if iteration == iter_inspect {
                                     println!("Raw");
@@ -497,13 +518,13 @@ impl JFIFImage {
                                     print_vector_dec(color_values.iter());
                                 }
 
+                                iteration += 1;
                                 if iteration == iter_inspect {
                                     new_component_blocks.push(repeat(0).take(64).collect());
                                     continue;
+                                } else {
+                                    new_component_blocks.push(color_values);
                                 }
-
-                                new_component_blocks.push(color_values);
-                                // println!("\n\n");
                             }
                             *component_blocks = new_component_blocks;
                         }
@@ -610,9 +631,11 @@ impl JFIFImage {
                         //      http://wooyaggo.tistory.com/104
                         //
                         // TODO: should clear this up.
+                        panic!("got {:?}", marker);
                     }
                     Marker::ApplicationSegment14 => {
                         // Application segment 14
+                        panic!("got {:?}", marker);
                     }
                 }
             } else {
@@ -706,7 +729,7 @@ fn print_vector_dec<I>(iter: I)
 const indices: [usize; 64] = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26,
                               33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56,
                               57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38,
-                              31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 53];
+                              31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
 #[allow(dead_code)]
 fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
     where T: Copy
@@ -721,8 +744,6 @@ fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
     }
     res
 }
-
-use std::iter::repeat;
 
 #[allow(dead_code)]
 fn zigzag_inverse<T>(vec: &Vec<T>) -> Vec<T>

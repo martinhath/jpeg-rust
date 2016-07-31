@@ -200,7 +200,8 @@ pub fn decode(ac_table: &Table,
     let index = Cell::new(scan_state.index + actual_n_bytes_read);
 
     if scan_state.bits_read > 0 {
-        current.set(current.get() << scan_state.bits_read);
+        let new_current = current.get() << scan_state.bits_read;
+        current.set(new_current);
     }
 
     let get_next_from_data = |i: usize| {
@@ -210,19 +211,22 @@ pub fn decode(ac_table: &Table,
             if res == 0xff {
                 if i + 1 < last_index {
                     let marker = data[i + 1];
-                    if marker == 0 {
-                        index.set(index.get() + 1);
+                    if marker == 0x00 {
+                        // index.set(index.get() + 1);
                     } else {
-                        println!("Possible marker: found 0xff{:02x}", marker);
+                        // TODO: Somehow either signal from here that we are at
+                        // the end, or search for EoI before calling this function,
+                        // and only pass the data slice (so we're out of bounds here).
+                        println!("Possible marker: found 0xff{:02x} (index={})", marker, i);
                     }
                 }
             }
             res
         } else {
             let s = format!("{}/{}", i, last_index);
-            println!("An illegal index was asked for: {}", s);
+            // println!("An illegal index was asked for: {}", s);
             let res = 0xaa;
-            println!("Defaulting to {:2x} ({:08b})", res, res);
+            // println!("Defaulting to {:2x} ({:08b})", res, res);
             res
         }
     };
@@ -242,6 +246,8 @@ pub fn decode(ac_table: &Table,
         }
     };
 
+    // println!("current: {:032b}", current.get());
+
     let read_n_bits = |n: u8| -> u32 {
         // TODO: implement properly
         if n > 16 {
@@ -258,7 +264,7 @@ pub fn decode(ac_table: &Table,
 
     let get_next_code = |table: &Table| -> u8 {
         // 16 upper bits of `current`
-        let mut current16 = ((current.get() & 0xffff0000) >> 16) as u16;
+        let current16 = ((current.get() & 0xffff0000) >> 16) as u16;
         // Check all code lengths, and try to find
         // a code that is the `length` upper bits of `current`.
         for length in 1..17 {
@@ -276,12 +282,14 @@ pub fn decode(ac_table: &Table,
                 }
             }
         }
-        panic!("failed to find code for current: {:16b}", current16);
+        0
+        // panic!("failed to find code for current: {:16b}", current16);
     };
 
     let dc_value_len = get_next_code(&dc_table);
     let dc_value = read_n_bits(dc_value_len);
     let dc_cof = dc_value_from_len_bits(dc_value_len, dc_value);
+    // println!("\tDC cof = {}", dc_cof);
 
     let mut result = Vec::<i16>::new();
     result.push(dc_cof);
@@ -294,10 +302,12 @@ pub fn decode(ac_table: &Table,
         }
         let next_code = get_next_code(&ac_table);
         if next_code == 0x00 {
+            // print!("(0, 0) ");
             result.extend(repeat(0).take(64 - n_pushed));
             break;
         }
         if next_code == 0xf0 {
+            // print!("(f, 0) ");
             let num_to_push = min(16, 64 - n_pushed);
             result.extend(repeat(0).take(num_to_push));
             n_pushed += num_to_push;
@@ -308,6 +318,7 @@ pub fn decode(ac_table: &Table,
         let num_length = next_code & 0x0f;
         let num_bits = read_n_bits(num_length);
         let num = dc_value_from_len_bits(num_length, num_bits);
+        // print!("({}, {})({}) ", zeroes, num_length, num);
         for _ in 0..min(zeroes, 64 - n_pushed - 1) {
             result.push(0)
         }
@@ -326,6 +337,11 @@ pub fn decode(ac_table: &Table,
 
     scan_state.index = index - 4;
     scan_state.bits_read = bits_read;
+    // print!("\n");
+
+    if result.len() != 64 {
+        panic!("`result.len` should be 64");
+    }
 
     result
 }
