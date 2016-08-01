@@ -1,6 +1,7 @@
 use std::iter::repeat;
 
 use jpeg::huffman;
+use jpeg::decoder::JPEGDecoder;
 use ::transform;
 
 // TODO: move this?
@@ -68,7 +69,7 @@ pub struct JFIFImage {
 }
 
 #[derive(Debug)]
-struct FrameHeader {
+pub struct FrameHeader {
     /// Bits per sample of each component in the frame
     sample_precision: u8,
     /// The maximum number of lines in the source image
@@ -78,27 +79,27 @@ struct FrameHeader {
     /// Number of image components in the frame
     image_components: u8,
     /// Headers for each component
-    frame_components: Vec<FrameComponentHeader>,
+    pub frame_components: Vec<FrameComponentHeader>,
 }
 
 #[derive(Debug, Clone)]
-struct FrameComponentHeader {
+pub struct FrameComponentHeader {
     /// Component id
-    component_id: u8,
+    pub component_id: u8,
     /// Relationship between component horizontal dimension and maximum image dimension (?)
-    horizontal_sampling_factor: u8,
+    pub horizontal_sampling_factor: u8,
     /// Relationship between component vertical dimension and maximum image dimension (?)
-    vertical_sampling_factor: u8,
+    pub vertical_sampling_factor: u8,
     /// Selector for this components quantization table
-    quantization_selector: u8,
+    pub quantization_selector: u8,
 }
 
 #[derive(Debug)]
-struct ScanHeader {
+pub struct ScanHeader {
     /// Number of components in the scan.
     num_components: u8,
     /// Headers for each component
-    scan_components: Vec<ScanComponentHeader>,
+    pub scan_components: Vec<ScanComponentHeader>,
     /// (?) Should be zero for seq. DCT
     start_spectral_selection: u8,
     /// (?) Should be 63 for seq. DCT
@@ -110,13 +111,13 @@ struct ScanHeader {
 }
 
 #[derive(Debug, Clone)]
-struct ScanComponentHeader {
+pub struct ScanComponentHeader {
     /// Component id
-    component_id: u8,
+    pub component_id: u8,
     /// Which DC huffman table the component uses
-    dc_table_selector: u8,
+    pub dc_table_selector: u8,
     /// Which AC huffman table the component uses
-    ac_table_selector: u8,
+    pub ac_table_selector: u8,
 }
 
 impl FrameHeader {
@@ -395,6 +396,7 @@ impl JFIFImage {
                             index
                         };
 
+
                         // Copy data, and replace 0xff00 with 0xff.
                         let mut encoded_data = Vec::new();
                         {
@@ -408,6 +410,14 @@ impl JFIFImage {
                                 i += 1;
                             }
                         }
+
+
+                        let mut jpeg_decoder = JPEGDecoder::new(encoded_data.as_slice())
+                            .frame_header(&jfif_image.frame_header.as_ref().unwrap())
+                            .scan_header(&scan_header);
+
+                        break;
+
 
 
                         // Map component_id to an index
@@ -424,6 +434,14 @@ impl JFIFImage {
                             }
                         };
                         // Map index to component_id
+                        // let frame_component = jfif_image.frame_header
+                        //    .as_ref()
+                        //    .expect("ERROR LEL")
+                        //    .frame_component(component_id)
+                        //    .expect("ERROR ROFL xdd");
+                        // let num_blocks_for_sample =
+                        //    num_blocks / frame_component.horizontal_sampling_factor as usize /
+                        //    frame_component.vertical_sampling_factor as usize;
                         let component_ids: Vec<u8> = scan_header.scan_components
                             .iter()
                             .map(|c| c.component_id)
@@ -468,9 +486,9 @@ impl JFIFImage {
                                     let skip_y = frame_component.vertical_sampling_factor as usize;
 
                                     if block_i_x % skip_x != 0 || block_i_y % skip_y != 0 {
-                                        println!("SKip reading block {} for component {}",
-                                                 block_i,
-                                                 component_id);
+                                        // println!("SKip reading block {} for component {}",
+                                        //          block_i,
+                                        //          component_id);
                                         continue;
                                     }
                                 }
@@ -591,7 +609,12 @@ impl JFIFImage {
                                 num as u8
                             };
                             for block_i in 0..num_blocks {
-                                let ref y_block = blocks[0][block_i];
+                                let zeroes: Vec<_> = repeat(0).take(64).collect();
+                                let ref y_block = if block_i < blocks[0].len() {
+                                    &blocks[0][block_i]
+                                } else {
+                                    &zeroes
+                                };
                                 let ref cb_block = blocks[1][block_i];
                                 let ref cr_block = blocks[2][block_i];
 
