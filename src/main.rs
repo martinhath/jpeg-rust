@@ -20,7 +20,8 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let bytes = file_to_bytes(Path::new("./small-lena.jpeg"));
+    let bytes = file_to_bytes(Path::new("./lena.jpeg"));
+    // let bytes = file_to_bytes(Path::new("./working-jpegs/huff_simple0.jpg"));
 
     let _ = JFIFImage::parse(bytes).unwrap();
 }

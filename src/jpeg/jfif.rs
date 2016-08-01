@@ -81,7 +81,7 @@ struct FrameHeader {
     frame_components: Vec<FrameComponentHeader>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FrameComponentHeader {
     /// Component id
     component_id: u8,
@@ -120,11 +120,18 @@ struct ScanComponentHeader {
 }
 
 impl FrameHeader {
+    fn frame_component(&self, component: u8) -> Option<FrameComponentHeader> {
+        self.frame_components
+            .iter()
+            .find(|comp_hdr| comp_hdr.component_id == component)
+            .map(|fc| fc.clone())
+    }
+
     fn quantization_table_id(&self, component: u8) -> Option<u8> {
         self.frame_components
             .iter()
-            .find(|&comp_hdr| comp_hdr.component_id == component)
-            .map(|ref comp_hdr| comp_hdr.quantization_selector)
+            .find(|comp_hdr| comp_hdr.component_id == component)
+            .map(|comp_hdr| comp_hdr.quantization_selector)
     }
 }
 
@@ -212,6 +219,7 @@ impl JFIFImage {
 
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
 
+        let debug = false;
 
         let mut i = 20;
         'main_loop: while i < vec.len() {
@@ -223,6 +231,7 @@ impl JFIFImage {
             let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
 
             if let Some(marker) = marker {
+                println!("{:?}, i={}, len={}", marker, i, data_length);
                 match marker {
                     Marker::Comment => {
                         // Comment
@@ -288,6 +297,7 @@ impl JFIFImage {
                             image_components: image_components,
                             frame_components: frame_components,
                         };
+                        println!("{:#?}", frame_header);
                         jfif_image.dimensions = (samples_per_line, num_lines);
                         jfif_image.frame_header = Some(frame_header)
                     }
@@ -319,6 +329,9 @@ impl JFIFImage {
 
                             let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                       data_area);
+                            if debug {
+                                huffman_table.print_table();
+                            }
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                     Some(huffman_table);
@@ -432,10 +445,35 @@ impl JFIFImage {
                             index: 0,
                             bits_read: 0,
                         };
+
+                        // Block index along X we're currently reading
+                        let mut block_i_x: usize = 0;
+                        // Block index along Y we're currently reading
+                        let mut block_i_y: usize = 0;
+
+                        // Assume interleaved
                         for block_i in 0..num_blocks {
-                            // Assume interleaved
                             for component in &scan_header.scan_components {
                                 let component_id = component.component_id;
+
+                                {
+                                    // TODO: Revisit this!
+                                    let frame_component = jfif_image.frame_header
+                                        .as_ref()
+                                        .expect("ERROR LEL")
+                                        .frame_component(component_id)
+                                        .expect("ERROR ROFL xdd");
+                                    let skip_x =
+                                        frame_component.horizontal_sampling_factor as usize;
+                                    let skip_y = frame_component.vertical_sampling_factor as usize;
+
+                                    if block_i_x % skip_x != 0 || block_i_y % skip_y != 0 {
+                                        println!("SKip reading block {} for component {}",
+                                                 block_i,
+                                                 component_id);
+                                        continue;
+                                    }
+                                }
 
                                 // Get tables
                                 // TODO: Probably don't do this inside this loop.
@@ -461,6 +499,11 @@ impl JFIFImage {
                                 blocks[component_index_from_id(component_id).unwrap()]
                                     .push(decoded);
                             }
+                            block_i_x += 1;
+                            if block_i_x >= num_blocks_hori {
+                                block_i_x -= num_blocks_hori;
+                                block_i_y += 1;
+                            }
                         }
 
                         // Step 2:
@@ -484,12 +527,21 @@ impl JFIFImage {
 
                             let mut new_component_blocks = Vec::new();
                             let mut previous_dc = 0;
-                            for block in component_blocks.iter_mut() {
+                            for (block_index, block) in component_blocks.iter_mut().enumerate() {
+                                if debug {
+                                    println!("Block {} component {}", block_index, component_id);
+                                }
                                 // DC correction
                                 let encoded = block[0];
                                 let decoded = encoded + previous_dc;
                                 previous_dc = decoded;
                                 block[0] = decoded;
+
+                                if debug {
+                                    println!("Raw:");
+                                    print_vector_dec(block.iter());
+                                    print!("\n");
+                                }
 
                                 // Dequantization, and convertion to f32
                                 // We do this before `zigzag_inverse`, because
@@ -501,6 +553,11 @@ impl JFIFImage {
 
                                 // TODO: Dequantization could take an iterator.
                                 let dequantized = zigzag_inverse(&dequantized);
+                                if debug {
+                                    println!("Dequantized:");
+                                    print_vector_dec(dequantized.iter());
+                                    print!("\n");
+                                }
 
                                 let spatial_block =
                                     transform::discrete_cosine_transform_inverse(&dequantized);
@@ -508,6 +565,12 @@ impl JFIFImage {
                                 let color_values: Vec<_> = spatial_block.iter()
                                     .map(|n| n.round() as i16)
                                     .collect();
+
+                                if debug {
+                                    println!("Color values: ");
+                                    print_vector_dec(color_values.iter());
+                                    print!("\n");
+                                }
 
                                 new_component_blocks.push(color_values);
                             }
@@ -564,7 +627,11 @@ impl JFIFImage {
                             };
                             for block in &blocks[0] {
                                 rgb_blocks.push(block.iter()
-                                    .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
+                                    .map(|&c| {
+                                        (clamp_to_u8(c + 128),
+                                         clamp_to_u8(c + 128),
+                                         clamp_to_u8(c + 128))
+                                    })
                                     .collect());
                             }
                         }
