@@ -437,7 +437,7 @@ impl JFIFImage {
                         let iter_inspect = 9999;
                         for block_i in 0..num_blocks {
                             // Assume interleaved
-                            for component in scan_header.scan_components.iter() {
+                            for component in &scan_header.scan_components {
                                 let component_id = component.component_id;
 
                                 // Get tables
@@ -469,7 +469,7 @@ impl JFIFImage {
                         // Step 2:
                         // Do relative DC calculation, dequantization,
                         // and inverse DCT component for component
-                        for component in scan_header.scan_components.iter() {
+                        for component in &scan_header.scan_components {
                             let component_id = component.component_id;
                             let component_index = component_index_from_id(component_id)
                                 .expect("ERROR");
@@ -571,7 +571,7 @@ impl JFIFImage {
                             } else {
                                 num as u8
                             };
-                            for block in blocks[0].iter() {
+                            for block in &blocks[0] {
                                 rgb_blocks.push(block.iter()
                                     .map(|&c| (clamp_to_u8(c), clamp_to_u8(c), clamp_to_u8(c)))
                                     .collect());
@@ -606,7 +606,7 @@ impl JFIFImage {
                                                    8 * num_blocks_hori,
                                                    8 * num_blocks_vert)
                             .as_bytes());
-                        for &(r, g, b) in image_data.iter() {
+                        for &(r, g, b) in &image_data {
                             let s = format!("{} {} {}\n", r, g, b);
                             let _ = file.write(s.as_bytes());
                         }

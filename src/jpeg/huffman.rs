@@ -119,7 +119,7 @@ impl Table {
     pub fn print_table(&self) {
         for (i, ref vec) in self.code_vecs.iter().enumerate() {
             let len = i + 1;
-            for &id in vec.iter() {
+            for &id in *vec {
                 let code = self.code_table[id as usize];
                 let code_string = format!("{:01$b}", code, len);
                 println!("#{:3}\t{:3}\t{:<16}",
@@ -254,7 +254,7 @@ pub fn decode(ac_table: &Table,
             let mask = BIT_MASKS[length];
             let code_candidate: u16 = ((current16 & mask) >> (16 - length)) as u16;
 
-            for &id in table.code_vecs[length - 1].iter() {
+            for &id in &table.code_vecs[length - 1] {
                 let idu = id as usize;
                 let code = table.code_table[idu];
                 if code == code_candidate {
