@@ -162,12 +162,6 @@ pub fn decode(ac_table: &Table,
     //       we will have non scan data in `current`.
     // TODO: naming - this is first illegal index.
     let last_index = data.len();
-    println!("[] {:?}", scan_state);
-    print!("[] ");
-    for n in data.iter().skip(scan_state.index).take(8) {
-        print!("{:02x} ", n);
-    }
-    println!("");
 
     // Need to check data[0-4] for 0xff bytes.
     // We might skip some bytes (eg when 0xff 0x00),

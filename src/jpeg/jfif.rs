@@ -213,8 +213,6 @@ impl JFIFImage {
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
 
 
-        print_vector(vec.iter().skip(12152));
-
         let mut i = 20;
         'main_loop: while i < vec.len() {
             // All segments have a 2 byte length
@@ -434,7 +432,6 @@ impl JFIFImage {
                             index: 0,
                             bits_read: 0,
                         };
-                        let iter_inspect = 9999;
                         for block_i in 0..num_blocks {
                             // Assume interleaved
                             for component in &scan_header.scan_components {
@@ -487,7 +484,6 @@ impl JFIFImage {
 
                             let mut new_component_blocks = Vec::new();
                             let mut previous_dc = 0;
-                            let mut iteration = 0;
                             for block in component_blocks.iter_mut() {
                                 // DC correction
                                 let encoded = block[0];
@@ -510,16 +506,10 @@ impl JFIFImage {
                                     transform::discrete_cosine_transform_inverse(&dequantized);
 
                                 let color_values: Vec<_> = spatial_block.iter()
-                                    // Skip rounding due to YCbCr
-                                    .map(|n| (n + 128f32).round() as i16)
+                                    .map(|n| n.round() as i16)
                                     .collect();
 
-                                iteration += 1;
-                                if iteration == iter_inspect {
-                                    new_component_blocks.push(repeat(0).take(64).collect());
-                                } else {
-                                    new_component_blocks.push(color_values);
-                                }
+                                new_component_blocks.push(color_values);
                             }
                             *component_blocks = new_component_blocks;
                         }
@@ -549,17 +539,18 @@ impl JFIFImage {
                                 let block: Vec<(u8, u8, u8)> = y_block.iter()
                                     .zip(cb_block.iter())
                                     .zip(cr_block.iter())
-                                    .map(|((&y, &cb), &cr)| {
-                                        (y as f32, cb as f32, cr as f32)
+                                    .map(|((&y, &cb), &cr)| (y as f32, cb as f32, cr as f32))
+                                    .map(|(y, cb, cr)| {
+                                        let r = cr * (2.0 - 2.0 * c_red) + y;
+                                        let b = cb * (2.0 - 2.0 * c_blue) + y;
+                                        let g = (y - c_blue * b - c_red * r) / c_green;
+                                        (r, g, b)
                                     })
-                                    // .map(|(y, cb, cr)| {
-                                    //     let r = cr * (2.0 - 2.0 * c_red) + y;
-                                    //     let b = cb * (2.0 - 2.0 * c_blue) + y;
-                                    //     let g = (y - c_blue * b - c_red * r) / c_green;
-                                    //     println!("rgb({}, {}, {})", r, g, b);
-                                    //     (r, g, b)
-                                    // })
-                                    .map(|(r, g, b)| (clamp_to_u8(r), clamp_to_u8(g), clamp_to_u8(b)))
+                                    .map(|(r, g, b)| {
+                                        (clamp_to_u8(r + 128.0),
+                                         clamp_to_u8(g + 128.0),
+                                         clamp_to_u8(b + 128.0))
+                                    })
                                     .collect();
                                 rgb_blocks.push(block);
                             }
@@ -624,11 +615,11 @@ impl JFIFImage {
                         //      http://wooyaggo.tistory.com/104
                         //
                         // TODO: should clear this up.
-                        panic!("got {:?}", marker);
+                        println!("got {:?}", marker);
                     }
                     Marker::ApplicationSegment14 => {
                         // Application segment 14
-                        panic!("got {:?}", marker);
+                        println!("got {:?}", marker);
                     }
                 }
             } else {
