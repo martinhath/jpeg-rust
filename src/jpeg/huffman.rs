@@ -129,6 +129,21 @@ impl Table {
             }
         }
     }
+
+    pub fn clone(&self) -> Table {
+        let mut code_vecs: [Vec<u8>; 16] = [Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                                            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                                            Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                                            Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        for (i, v) in self.code_vecs.iter().enumerate() {
+            code_vecs[i].extend(v);
+        }
+        Table {
+            code_table: self.code_table.iter().cloned().collect(),
+            code_vecs: code_vecs,
+            data_table: self.data_table.iter().cloned().collect(),
+        }
+    }
 }
 
 #[derive(Debug)]

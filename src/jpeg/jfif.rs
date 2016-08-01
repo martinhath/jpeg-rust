@@ -68,7 +68,7 @@ pub struct JFIFImage {
     frame_header: Option<FrameHeader>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FrameHeader {
     /// Bits per sample of each component in the frame
     sample_precision: u8,
@@ -412,10 +412,26 @@ impl JFIFImage {
                         }
 
 
+                        let frame_header = jfif_image.frame_header.clone().unwrap();
                         let mut jpeg_decoder = JPEGDecoder::new(encoded_data.as_slice())
-                            .frame_header(&jfif_image.frame_header.as_ref().unwrap())
-                            .scan_header(&scan_header);
+                            .frame_header(frame_header)
+                            .scan_header(scan_header)
+                            .dimensions((jfif_image.dimensions.0 as usize,
+                                         jfif_image.dimensions.1 as usize));
 
+                        for (i, table) in jfif_image.huffman_ac_tables.iter().enumerate() {
+                            if let &Some(ref table) = table {
+                                jpeg_decoder.huffman_ac_tables(i as u8, table.clone());
+                            }
+                        }
+
+                        for (i, table) in jfif_image.huffman_dc_tables.iter().enumerate() {
+                            if let &Some(ref table) = table {
+                                jpeg_decoder.huffman_dc_tables(i as u8, table.clone());
+                            }
+                        }
+
+                        jpeg_decoder.decode();
                         break;
 
 
