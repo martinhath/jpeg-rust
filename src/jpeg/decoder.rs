@@ -53,6 +53,10 @@ impl<'a> JPEGDecoder<'a> {
         self.huffman_dc_tables[id as usize] = Some(table);
     }
 
+    pub fn quantization_table(&mut self, id: u8, table: Vec<u8>) {
+        self.quantization_tables[id as usize] = Some(table);
+    }
+
     pub fn frame_header(mut self, frame_header: FrameHeader) -> JPEGDecoder<'a> {
         for frame_component in &frame_header.frame_components {
             // Update horiz/vert sampling factor, and quant selector.
@@ -150,17 +154,23 @@ impl<'a> JPEGDecoder<'a> {
         };
         // 2D vector, one vector for each component.
         let mut blocks: Vec<Vec<Block>> = (0..self.component_fields.len())
-            .map(|_| vec![Vec::new()])
+            .map(|_| vec![])
             .collect();
-        let mut previous_dc: Vec<f32> = (0..self.component_fields.len()).map(|_| 0.0).collect();
+        let mut previous_dc: Vec<f32> = repeat(0.0).take(self.component_fields.len()).collect();
 
+        // Step 1: Read encoded data
         for block_i in 0..num_blocks {
             for (component_i, component) in self.component_fields.iter().enumerate() {
+
+                // Skip reading components which have a sampling factor,
+                // and is not at the last block (eg, factor=2 menas read
+                // on odd indices).
                 let hsf = component.horizontal_sampling_factor as usize;
                 let vsf = component.vertical_sampling_factor as usize;
-                if block_i % hsf != 0 || (block_i / num_blocks_y) % vsf != 0 {
+                if block_i % hsf != (hsf - 1) || (block_i / num_blocks_y) % vsf != (vsf - 1) {
                     continue;
                 }
+
                 let ac_table = self.ac_table(component.ac_table_id);
                 let dc_table = self.dc_table(component.dc_table_id);
 
@@ -178,13 +188,16 @@ impl<'a> JPEGDecoder<'a> {
                 blocks[component_i].push(decoded_block);
             }
         }
+        println!("{:?}", blocks[0][0]);
 
+        // Step 2: get color data
         // Now all decoded blocks are in `blocks`.
         // For each block, do dequantization, reverse zigzag, and inverse DCT.
         for (component_i, component) in self.component_fields.iter().enumerate() {
             let quant_table = self.quantization_tables[component.quantization_id as usize]
                 .as_ref()
-                .unwrap();
+                .expect(&format!("Did not find quantization table for {}",
+                                 component.quantization_id));
 
             let component_blocks: Vec<Vec<f32>> = blocks[component_i]
                 .iter()
@@ -195,12 +208,144 @@ impl<'a> JPEGDecoder<'a> {
                 })
                 .map(|block| transform::discrete_cosine_transform_inverse(&block))
                 .collect();
-            blocks[component_i] = component_blocks;
+
+            // Now we may need to expand blocks for some compoents,
+            // in case some sampling factors are > 1.
+            assert!(component.horizontal_sampling_factor < 3);
+            // TODO: Fix vertical scaling
+            assert!(component.vertical_sampling_factor == 1);
+            if component.horizontal_sampling_factor == 2 {
+                blocks[component_i] = component_blocks.iter()
+                    .flat_map(|block| {
+                        let (a, b) = expand_block_x_2(block);
+                        vec![a, b]
+                    })
+                    .collect();
+            } else {
+                blocks[component_i] = component_blocks;
+            }
+        }
+        println!("{:?}", blocks[0][0]);
+
+        // Step 3: Merge color data
+        let rgb_blocks: Vec<Vec<(u8, u8, u8)>> = if num_components == 3 {
+                blocks[0]
+                    .iter()
+                    .zip(blocks[1].iter())
+                    .zip(blocks[2].iter())
+                    .map(|((y_block, cb_block), cr_block)| {
+                        y_block.iter()
+                            .zip(cb_block.iter())
+                            .zip(cr_block.iter())
+                            .map(|((&y, &cb), &cr)| y_cb_cr_to_rgb(y, cb, cr))
+                            .collect()
+                    })
+                    .collect()
+            } else {
+                // TODO: find out if grayscale, is it still YCbCr, or just RGB?
+                blocks[0]
+                    .iter()
+                    .map(|block| {
+                        block.iter()
+                        // .map(|&g| y_cb_cr_to_rgb(g, g, g))
+                        .map(|&g| (g, g, g))
+                        .collect()
+                    })
+                    .collect::<Vec<Vec<(f32, f32, f32)>>>()
+            }
+            .iter()
+            .map(|block| {
+                block.iter()
+                    .map(|&(r, g, b)| {
+                        (f32_to_u8(r + 128.0), f32_to_u8(g + 128.0), f32_to_u8(b + 128.0))
+                    })
+                    .collect()
+            })
+            .collect();
+
+
+        // debug print
+        for (i, n) in rgb_blocks[0].iter().enumerate() {
+            print!("{:02x}{:02x}{:02x} ", n.0, n.1, n.2);
+            if i % 8 == 7 {
+                print!("\n");
+            }
         }
 
-        // Now we may need to expand blocks for some compoents,
-        // in case some sampling factors are > 1.
+        let mut image_data: Vec<(u8, u8, u8)> = Vec::with_capacity(num_blocks * 64);
+        for block_y in 0..num_blocks_y {
+            for line in 0..8 {
+                for block_x in 0..num_blocks_x {
+                    let block_index = num_blocks_x * block_y + block_x;
+                    let ref block = rgb_blocks[block_index];
+                    for row in 0..8 {
+                        let in_block_index = 8 * line + row;
+                        image_data.push(block[in_block_index]);
+                    }
+                }
+            }
+        }
+        // Show the image, somehow.
+
+        use std::fs::File;
+        use std::io::Write;
+        let mut file = File::create("output.ppm").unwrap();
+        let _ =
+            file.write(format!("P3\n{} {}\n255\n", 8 * num_blocks_x, 8 * num_blocks_y).as_bytes());
+        for &(r, g, b) in &image_data {
+            let s = format!("{} {} {}\n", r, g, b);
+            let _ = file.write(s.as_bytes());
+        }
+
     }
+}
+
+fn f32_to_u8(n: f32) -> u8 {
+    if n < 0.0 {
+        0
+    } else if n > 255.0 {
+        255
+    } else {
+        n as u8
+    }
+}
+
+fn y_cb_cr_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
+    let c_red: f32 = 0.299;
+    let c_green: f32 = 0.587;
+    let c_blue: f32 = 0.114;
+
+    let r = cr * (2.0 - 2.0 * c_red) + y;
+    let b = cb * (2.0 - 2.0 * c_blue) + y;
+    let g = (y - c_blue * b - c_red * r) / c_green;
+
+    (r, g, b)
+}
+
+fn expand_block_x_2(block: &Block) -> (Block, Block) {
+    // Expand a block along the x axis:
+    //
+    //  |1 2|      |1 1| |2 2|
+    //  |3 4|  --> |3 3| |4 4|
+
+    // Assume 8x8 block:
+    assert!(block.len() == 64,
+            "Implement me properly! (len={})",
+            block.len());
+
+    let mut block_a = Vec::new();
+    let mut block_b = Vec::new();
+    for (i, &n) in block.iter().enumerate() {
+        let is_block_a = (i % 8) / 2 < 4;
+        if is_block_a {
+            block_a.push(n);
+            block_a.push(n);
+        } else {
+            block_b.push(n);
+            block_b.push(n);
+        }
+    }
+    (block_a, block_b)
 }
 
 #[derive(Debug, Clone)]
@@ -243,15 +388,23 @@ fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
     res
 }
 
+const ZIGZAG_INDICES_REV: [usize; 64] =
+    [0, 1, 5, 6, 14, 15, 27, 28, 2, 4, 7, 13, 16, 26, 29, 42, 3, 8, 12, 17, 25, 30, 41, 43, 9, 11,
+     18, 24, 31, 40, 44, 53, 10, 19, 23, 32, 39, 45, 52, 54, 20, 22, 33, 38, 46, 51, 55, 60, 21,
+     34, 37, 47, 50, 56, 59, 61, 35, 36, 48, 49, 57, 58, 62, 63];
+
+use std::fmt::Debug;
 #[allow(dead_code)]
 fn zigzag_inverse<I>(iter: I) -> Vec<I::Item>
     where I: Iterator,
           I::Item: Copy,
-          I::Item: Default
+          I::Item: Default,
+          I::Item: Debug
 {
     let mut res: Vec<I::Item> = repeat(Default::default()).take(64).collect();
-    for (i, n) in iter.enumerate() {
-        res[i] = n;
+    for (zig_index, number) in iter.enumerate() {
+        let original_index = ZIGZAG_INDICES[zig_index];
+        res[original_index] = number;
     }
     res
 }
