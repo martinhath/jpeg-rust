@@ -178,41 +178,38 @@ impl<'a> JPEGDecoder<'a> {
             .collect();
         let mut previous_dc: Vec<f32> = repeat(0.0).take(self.component_fields.len()).collect();
 
+        let max_block_hori_scale = self.component_fields
+            .iter()
+            .map(|c| c.horizontal_sampling_factor)
+            .max()
+            .unwrap_or(1) as usize;
         // Step 1: Read encoded data
-        for block_i in 0..num_blocks {
+        for block_i in 0..num_blocks / max_block_hori_scale {
             for (component_i, component) in self.component_fields.iter().enumerate() {
-
-                // Skip reading components which have a sampling factor,
-                // and is not at the last block (eg, factor=2 menas read
-                // on odd indices).
-                let hsf = component.horizontal_sampling_factor as usize;
-                let vsf = component.vertical_sampling_factor as usize;
-                if block_i % hsf != (hsf - 1) || (block_i / num_blocks_y) % vsf != (vsf - 1) {
-                    continue;
-                }
-
                 let ac_table = self.ac_table(component.ac_table_id);
                 let dc_table = self.dc_table(component.dc_table_id);
                 println!("decode block_i={} component={}",
                          block_i,
                          component.component);
 
-                let mut decoded_block: Vec<f32> =
-                    huffman::decode(ac_table, dc_table, &self.data, &mut scan_state)
-                        .iter()
-                        .map(|&i| i as f32)
-                        .collect();
-                println!("  now at index {}/{}", scan_state.index, self.data.len());
+                for _ in 0..component.horizontal_sampling_factor {
+                    let mut decoded_block: Vec<f32> =
+                        huffman::decode(ac_table, dc_table, &self.data, &mut scan_state)
+                            .iter()
+                            .map(|&i| i as f32)
+                            .collect();
+                    println!("  now at index {}/{}", scan_state.index, self.data.len());
 
-                // DC correction
-                let encoded = decoded_block[0];
-                decoded_block[0] = encoded + previous_dc[component_i];
-                previous_dc[component_i] = decoded_block[0];
+                    // DC correction
+                    let encoded = decoded_block[0];
+                    decoded_block[0] = encoded + previous_dc[component_i];
+                    previous_dc[component_i] = decoded_block[0];
 
-                blocks[component_i].push(decoded_block);
+                    blocks[component_i].push(decoded_block);
+                }
             }
         }
-        println!("{:?}", blocks[0][0]);
+        println!("{:?}", scan_state);
 
         // Step 2: get color data
         // Now all decoded blocks are in `blocks`.
@@ -238,7 +235,7 @@ impl<'a> JPEGDecoder<'a> {
             assert!(component.horizontal_sampling_factor < 3);
             // TODO: Fix vertical scaling
             assert!(component.vertical_sampling_factor == 1);
-            if component.horizontal_sampling_factor == 2 {
+            if component.horizontal_sampling_factor == 1 {
                 blocks[component_i] = component_blocks.iter()
                     .flat_map(|block| {
                         let (a, b) = expand_block_x_2(block);

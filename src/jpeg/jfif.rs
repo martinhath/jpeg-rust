@@ -376,6 +376,9 @@ impl JFIFImage {
                         println!("{:#?}", scan_header);
                         i += 8;
                         // `i` is now at the head of the data.
+                        //
+                        print_vector(vec.iter().skip(i - 14));
+
 
 
                         // Try to find a marker:
