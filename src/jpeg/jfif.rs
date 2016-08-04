@@ -2,7 +2,6 @@ use std::iter::repeat;
 
 use jpeg::huffman;
 use jpeg::decoder::JPEGDecoder;
-use ::transform;
 
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
@@ -118,31 +117,6 @@ pub struct ScanComponentHeader {
     pub dc_table_selector: u8,
     /// Which AC huffman table the component uses
     pub ac_table_selector: u8,
-}
-
-impl FrameHeader {
-    fn frame_component(&self, component: u8) -> Option<FrameComponentHeader> {
-        self.frame_components
-            .iter()
-            .find(|comp_hdr| comp_hdr.component_id == component)
-            .map(|fc| fc.clone())
-    }
-
-    fn quantization_table_id(&self, component: u8) -> Option<u8> {
-        self.frame_components
-            .iter()
-            .find(|comp_hdr| comp_hdr.component_id == component)
-            .map(|comp_hdr| comp_hdr.quantization_selector)
-    }
-}
-
-impl ScanHeader {
-    fn scan_component_header(&self, component: u8) -> Option<ScanComponentHeader> {
-        self.scan_components
-            .iter()
-            .find(|sch| sch.component_id == component)
-            .map(|sch| sch.clone())
-    }
 }
 
 #[derive(Debug)]
