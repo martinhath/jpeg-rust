@@ -28,6 +28,26 @@ pub struct JPEGDecoder<'a> {
     dimensions: (usize, usize),
 }
 
+#[derive(Debug, Clone)]
+/// All component specific fields:
+///
+// TODO: Rather use Option<> on the fields, as they may not
+//       be set?
+struct JPEGDecoderComponentFields {
+    /// Component ID
+    component: u8,
+    /// AC Huffman table id
+    dc_table_id: u8,
+    /// DC Huffman table id
+    ac_table_id: u8,
+    /// Quantization table id
+    quantization_id: u8,
+    /// Number of pixels for each sample in horizontal direction (?)
+    horizontal_sampling_factor: u8,
+    /// Number of pixels for each sample in horizontal direction (?)
+    vertical_sampling_factor: u8,
+}
+
 impl<'a> JPEGDecoder<'a> {
     pub fn new(data: &'a [u8]) -> JPEGDecoder {
         JPEGDecoder {
@@ -173,12 +193,16 @@ impl<'a> JPEGDecoder<'a> {
 
                 let ac_table = self.ac_table(component.ac_table_id);
                 let dc_table = self.dc_table(component.dc_table_id);
+                println!("decode block_i={} component={}",
+                         block_i,
+                         component.component);
 
                 let mut decoded_block: Vec<f32> =
                     huffman::decode(ac_table, dc_table, &self.data, &mut scan_state)
                         .iter()
                         .map(|&i| i as f32)
                         .collect();
+                println!("  now at index {}/{}", scan_state.index, self.data.len());
 
                 // DC correction
                 let encoded = decoded_block[0];
@@ -336,7 +360,7 @@ fn expand_block_x_2(block: &Block) -> (Block, Block) {
     let mut block_a = Vec::new();
     let mut block_b = Vec::new();
     for (i, &n) in block.iter().enumerate() {
-        let is_block_a = (i % 8) / 2 < 4;
+        let is_block_a = i % 8 < 4;
         if is_block_a {
             block_a.push(n);
             block_a.push(n);
@@ -346,26 +370,6 @@ fn expand_block_x_2(block: &Block) -> (Block, Block) {
         }
     }
     (block_a, block_b)
-}
-
-#[derive(Debug, Clone)]
-/// All component specific fields:
-///
-// TODO: Rather use Option<> on the fields, as they may not
-//       be set?
-struct JPEGDecoderComponentFields {
-    /// Component ID
-    component: u8,
-    /// AC Huffman table id
-    dc_table_id: u8,
-    /// DC Huffman table id
-    ac_table_id: u8,
-    /// Quantization table id
-    quantization_id: u8,
-    /// Number of pixels for each sample in horizontal direction (?)
-    horizontal_sampling_factor: u8,
-    /// Number of pixels for each sample in horizontal direction (?)
-    vertical_sampling_factor: u8,
 }
 
 // hardcode dis shit lol

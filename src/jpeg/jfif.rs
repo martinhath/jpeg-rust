@@ -384,14 +384,15 @@ impl JFIFImage {
                             while index < vec.len() - 1 {
                                 let ff = vec[index];
                                 let marker = vec[index + 1];
+                                if ff == 0xff && marker == 0xd9 {
+                                    break;
+                                }
                                 if ff == 0xff && marker != 0x00 {
                                     println!("Found marker at index {} : 0xff{:02x}",
                                              index,
                                              marker);
-                                    break;
-                                } else {
-                                    index += 1;
                                 }
+                                index += 1;
                             }
                             index
                         };
