@@ -6,6 +6,7 @@ mod jpeg;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::env;
 
 use jpeg::jfif::*;
 
@@ -20,8 +21,11 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let bytes = file_to_bytes(Path::new("./lena.jpeg"));
-    //  let bytes = file_to_bytes(Path::new("./working-jpegs/lena-bw.jpeg"));
+    let mut args = env::args();
+    args.next();
+    let input_file = args.next().unwrap();
+    let output_file = args.next().unwrap();
 
-    let _ = JFIFImage::parse(bytes).unwrap();
+    let bytes = file_to_bytes(Path::new(&input_file));
+    let _ = JFIFImage::parse(bytes, &output_file).unwrap();
 }

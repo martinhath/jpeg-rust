@@ -183,7 +183,7 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
 
 #[allow(unused_variables)]
 impl JFIFImage {
-    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
+    pub fn parse(vec: Vec<u8>, output_filename: &str) -> Result<JFIFImage, String> {
         // you can identify a JFIF file by looking for the following sequence:
         //
         //      X'FF', SOI, X'FF', APP0, <2 bytes to be skipped>, "JFIF", X'00'.
@@ -376,8 +376,6 @@ impl JFIFImage {
                         println!("{:#?}", scan_header);
                         i += 8;
                         // `i` is now at the head of the data.
-                        //
-                        print_vector(vec.iter().skip(i - 14));
 
 
 
@@ -441,7 +439,7 @@ impl JFIFImage {
                             }
                         }
 
-                        jpeg_decoder.decode();
+                        jpeg_decoder.decode(output_filename);
                         break;
                     }
                     Marker::RestartIntervalDefinition => {
