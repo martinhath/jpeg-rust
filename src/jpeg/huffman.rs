@@ -146,6 +146,55 @@ impl Table {
     }
 }
 
+pub struct HuffmanDecoder<'a> {
+    /// Data stream
+    data: &'a [u8],
+    /// The index of next byte to read from the data stream
+    next_index: usize,
+    /// Number of bits read and shifted out of `current`.
+    bits_read: usize,
+    /// The bits we act on
+    current: u32,
+}
+
+impl<'a> HuffmanDecoder<'a> {
+    pub fn new(data: &'a [u8]) -> HuffmanDecoder<'a> {
+        HuffmanDecoder {
+            data: data,
+            next_index: 0,
+            bits_read: 0,
+            current: 0,
+        }
+    }
+
+    /// Read the next 8x8 block
+    pub fn next_block(ac_table: &Table, dc_table: &Table) -> Vec<f32> {
+        panic!("Implement me");
+    }
+
+    /// Read `n` bits from `current`
+    fn read_n_bits(n: usize) -> u32 {
+        panic!("Implement me");
+    }
+
+    /// Get the next code from `current` in the supplied table.
+    fn next_code(table: &Table) {
+        panic!("Implement me");
+    }
+
+    /// Get the next code from `current` in the supplied table, when
+    /// we know the length of the code.
+    fn next_code_n(len: usize) {
+        panic!("Implement me");
+    }
+
+    /// Shift out `len` bits from `current`, and extend with new data
+    /// from `data` if appropriate
+    fn shift_and_fix_current(len: usize) {
+        panic!("Implement me");
+    }
+}
+
 #[derive(Debug)]
 pub struct ScanState {
     pub index: usize,
