@@ -2,11 +2,12 @@
 #[allow(dead_code)]
 mod transform;
 mod jpeg;
-// use std::f32;
+
+use std::env;
 use std::fs::File;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
-use std::env;
 
 use jpeg::jfif::*;
 
@@ -27,5 +28,13 @@ fn main() {
     let output_file = args.next().unwrap();
 
     let bytes = file_to_bytes(Path::new(&input_file));
-    let _ = JFIFImage::parse(bytes, &output_file).unwrap();
+    let image = JFIFImage::parse(bytes, &output_file).unwrap();
+    // Show the image, somehow.
+
+    let mut file = File::create(output_file).unwrap();
+    let _ = file.write(format!("P3\n{} {}\n255\n", image.width(), image.height()).as_bytes());
+    for &(r, g, b) in image.image_data().unwrap() {
+        let s = format!("{} {} {}\n", r, g, b);
+        let _ = file.write(s.as_bytes());
+    }
 }

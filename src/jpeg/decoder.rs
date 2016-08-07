@@ -156,7 +156,7 @@ impl<'a> JPEGDecoder<'a> {
         self.huffman_dc_tables[id as usize].as_ref().unwrap()
     }
 
-    pub fn decode(&mut self, output_file: &str) -> () {
+    pub fn decode(&mut self) -> Vec<(u8, u8, u8)> {
         // Number of blocks in x and y direction
         let num_blocks_x = (self.dimensions.0 + 7) / 8;
         let num_blocks_y = (self.dimensions.1 + 7) / 8;
@@ -251,14 +251,12 @@ impl<'a> JPEGDecoder<'a> {
                     })
                     .collect()
             } else {
-                // TODO: find out if grayscale, is it still YCbCr, or just RGB?
                 blocks[0]
                     .iter()
                     .map(|block| {
                         block.iter()
-                        // .map(|&g| y_cb_cr_to_rgb(g, g, g))
-                        .map(|&g| (g, g, g))
-                        .collect()
+                            .map(|&g| (g, g, g))
+                            .collect()
                     })
                     .collect::<Vec<Vec<(f32, f32, f32)>>>()
             }
@@ -285,17 +283,7 @@ impl<'a> JPEGDecoder<'a> {
                 }
             }
         }
-        // Show the image, somehow.
-
-        use std::fs::File;
-        use std::io::Write;
-        let mut file = File::create(output_file).unwrap();
-        let _ =
-            file.write(format!("P3\n{} {}\n255\n", 8 * num_blocks_x, 8 * num_blocks_y).as_bytes());
-        for &(r, g, b) in &image_data {
-            let s = format!("{} {} {}\n", r, g, b);
-            let _ = file.write(s.as_bytes());
-        }
+        image_data
     }
 }
 

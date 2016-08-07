@@ -146,6 +146,8 @@ impl Table {
     }
 }
 
+/// Struct used to handle state when decoding image blocks
+/// encoded with huffman coding.
 pub struct HuffmanDecoder<'a> {
     /// Data stream
     data: &'a [u8],
@@ -205,7 +207,8 @@ impl<'a> HuffmanDecoder<'a> {
             // The AC codes are laid out like this:
             // `(prepending_zeroes, num_bits_in_code)(code)`
             // where `prepending_zeroes` and `num_bits` are 4 bits, and
-            // `code` is `num_bits` long. `code` is _not_ huffman encoded.
+            // `code` is `num_bits` long.
+            // The tuple is huffman encoded. `code` is not.
             let prepending_zeroes = ((next_code & 0xf0) >> 4) as usize;
             let num_bits = (next_code & 0xf) as usize;
             let num = self.read_n_bits(num_bits);
@@ -271,7 +274,11 @@ impl<'a> HuffmanDecoder<'a> {
             self.bits_read -= 8;
             let next_num = {
                 if self.next_index >= self.data.len() {
-                    println!("Should not be here too often!");
+                    // We might need to shift in additional data
+                    // when we are at the end. Assuming the file
+                    // is well formed, these values will not be read,
+                    // and is only fill data, in order to avoid
+                    // out-of-range indexing.
                     0xaa
                 } else {
                     self.data[self.next_index]

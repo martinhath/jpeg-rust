@@ -63,8 +63,9 @@ pub struct JFIFImage {
     huffman_ac_tables: [Option<huffman::Table>; 4],
     huffman_dc_tables: [Option<huffman::Table>; 4],
     quantization_tables: [Option<Vec<u8>>; 4],
-    // TODO: multiple frames ?
     frame_header: Option<FrameHeader>,
+    // NOTE: only support 8-bit precision
+    image_data: Option<Vec<(u8, u8, u8)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +158,16 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
 
 #[allow(unused_variables)]
 impl JFIFImage {
+    pub fn width(&self) -> usize {
+        self.dimensions.0 as usize
+    }
+    pub fn height(&self) -> usize {
+        self.dimensions.1 as usize
+    }
+    pub fn image_data(&self) -> Option<&Vec<(u8, u8, u8)>> {
+        self.image_data.as_ref()
+    }
+
     pub fn parse(vec: Vec<u8>, output_filename: &str) -> Result<JFIFImage, String> {
         // you can identify a JFIF file by looking for the following sequence:
         //
@@ -190,6 +201,7 @@ impl JFIFImage {
             huffman_dc_tables: [None, None, None, None],
             quantization_tables: [None, None, None, None],
             frame_header: None,
+            image_data: None,
         };
 
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
@@ -413,7 +425,9 @@ impl JFIFImage {
                             }
                         }
 
-                        jpeg_decoder.decode(output_filename);
+                        let image_data = jpeg_decoder.decode();
+                        jfif_image.image_data = Some(image_data);
+
                         break;
                     }
                     Marker::RestartIntervalDefinition => {
