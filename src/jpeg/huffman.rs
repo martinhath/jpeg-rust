@@ -176,6 +176,14 @@ impl<'a> HuffmanDecoder<'a> {
         }
     }
 
+    pub fn bits_read(&self) -> usize {
+        self.bits_read
+    }
+
+    pub fn next_index(&self) -> usize {
+        self.next_index
+    }
+
     /// Read the next 8x8 block
     pub fn next_block(&mut self, ac_table: &Table, dc_table: &Table) -> Vec<i16> {
         // First we read the DC coefficient, which is encoded as

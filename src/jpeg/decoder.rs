@@ -156,7 +156,7 @@ impl<'a> JPEGDecoder<'a> {
         self.huffman_dc_tables[id as usize].as_ref().unwrap()
     }
 
-    pub fn decode(&mut self) -> Vec<(u8, u8, u8)> {
+    pub fn decode(&mut self) -> (Vec<(u8, u8, u8)>, usize) {
         // Number of blocks in x and y direction
         let num_blocks_x = (self.dimensions.0 + 7) / 8;
         let num_blocks_y = (self.dimensions.1 + 7) / 8;
@@ -283,7 +283,17 @@ impl<'a> JPEGDecoder<'a> {
                 }
             }
         }
-        image_data
+
+        // A scan must end on a byte boundary. If we are into the next byte,
+        // increment by one. Subtract `4` for the four bytes taht are
+        // shifted into `current`.
+        let bytes_read = if huffman_decoder.bits_read() > 0 {
+            huffman_decoder.next_index() + 1
+        } else {
+            huffman_decoder.next_index()
+        } - 4;
+
+        (image_data, bytes_read)
     }
 }
 

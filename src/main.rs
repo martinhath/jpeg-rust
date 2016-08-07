@@ -24,8 +24,8 @@ fn file_to_bytes(path: &Path) -> Vec<u8> {
 fn main() {
     let mut args = env::args();
     args.next();
-    let input_file = args.next().unwrap();
-    let output_file = args.next().unwrap();
+    let input_file = args.next().expect("Must supply an input file");
+    let output_file = args.next().expect("Must supply an output file");
 
     let bytes = file_to_bytes(Path::new(&input_file));
     let image = JFIFImage::parse(bytes, &output_file).unwrap();

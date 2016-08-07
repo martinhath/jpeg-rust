@@ -1,5 +1,3 @@
-use std::iter::repeat;
-
 use jpeg::huffman;
 use jpeg::decoder::JPEGDecoder;
 
@@ -9,7 +7,6 @@ fn u8s_to_u16(bytes: &[u8]) -> u16 {
     let lsb = bytes[1] as u16;
     (msb << 8) + lsb
 }
-
 
 #[derive(Debug)]
 pub enum JFIFUnits {
@@ -24,11 +21,7 @@ impl JFIFUnits {
             1 => JFIFUnits::NoUnits,
             2 => JFIFUnits::DotsPerInch,
             3 => JFIFUnits::DotsPerCm,
-            _ => {
-                println!("wtf is unit {}? Default to NoUnits", byte);
-                JFIFUnits::NoUnits
-            }
-            // _ => return Err(format!("Illegal unit byte: {}", byte)),
+            _ => return Err(format!("Illegal unit byte: {}", byte)),
         })
     }
 }
@@ -45,7 +38,7 @@ impl JFIFVersion {
         Ok(match (msb, lsb) {
             (1, 1) => JFIFVersion::V1_01,
             (1, 2) => JFIFVersion::V1_02,
-            _ => return Err(format!("Illegal version: ({}, {})", msb, lsb)),
+            _ => return Err(format!("Unknown version: ({}, {})", msb, lsb)),
         })
     }
 }
@@ -53,18 +46,34 @@ impl JFIFVersion {
 type JPEGDimensions = (u16, u16);
 type ThumbnailDimensions = (u8, u8);
 
+/// Struct used to represent an image parsed by the library.
+/// This should contain everything one would want to know
+/// about the image.
 #[derive(Debug)]
 pub struct JFIFImage {
+    /// JFIF version the image is compliant to
     version: JFIFVersion,
+    /// TODO:
     units: JFIFUnits,
+    /// Image dimensions
     dimensions: JPEGDimensions,
-    thumbnail_dimensions: ThumbnailDimensions,
+    /// Dimensions of the thumbnail, if present
+    /// TODO: add thumbnail.
+    /// Maybe join image data and dimensions to one struct?
+    thumbnail_dimensions: Option<ThumbnailDimensions>,
+    /// Optional comment
     comment: Option<String>,
+    /// huffman tables for AC coefficients
     huffman_ac_tables: [Option<huffman::Table>; 4],
+    /// huffman tables for DC coefficients
     huffman_dc_tables: [Option<huffman::Table>; 4],
+    /// Quantization tables
     quantization_tables: [Option<Vec<u8>>; 4],
+    /// Frame header data
     frame_header: Option<FrameHeader>,
-    // NOTE: only support 8-bit precision
+    /// Actual image data.
+    /// NOTE: only support 8-bit precision
+    /// TODO: Add support for other precisions
     image_data: Option<Vec<(u8, u8, u8)>>,
 }
 
@@ -120,9 +129,9 @@ pub struct ScanComponentHeader {
     pub ac_table_selector: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Marker {
-    // TODO: fill in these
+    // TODO: fill in the rest of these
     StartOfScan,
     DefineHuffmanTable,
     Comment,
@@ -131,6 +140,7 @@ enum Marker {
     RestartIntervalDefinition,
     ApplicationSegment12,
     ApplicationSegment14,
+    EndOfImage,
 }
 
 fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
@@ -145,6 +155,7 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
     let marker = match n {
         0xc0 => BaselineDCT,
         0xc4 => DefineHuffmanTable,
+        0xd9 => EndOfImage,
         0xda => StartOfScan,
         0xdb => QuantizationTable,
         0xdd => RestartIntervalDefinition,
@@ -161,9 +172,11 @@ impl JFIFImage {
     pub fn width(&self) -> usize {
         self.dimensions.0 as usize
     }
+
     pub fn height(&self) -> usize {
         self.dimensions.1 as usize
     }
+
     pub fn image_data(&self) -> Option<&Vec<(u8, u8, u8)>> {
         self.image_data.as_ref()
     }
@@ -195,7 +208,7 @@ impl JFIFImage {
             version: version,
             units: units,
             dimensions: (x_density, y_density),
-            thumbnail_dimensions: thumbnail_dimensions,
+            thumbnail_dimensions: Some(thumbnail_dimensions),
             comment: None,
             huffman_ac_tables: [None, None, None, None],
             huffman_dc_tables: [None, None, None, None],
@@ -206,19 +219,19 @@ impl JFIFImage {
 
         let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
 
-        let debug = false;
-
         let mut i = 20;
-        'main_loop: while i < vec.len() {
-            // All segments have a 2 byte length
-            // right after the marker code
-            let marker = bytes_to_marker(&vec[i..]);
-            // NOTE: this does not count the length bytes anymore!
-            // TODO: Maybe do count them? In order to make it less confusing
-            let data_length = bytes_to_len(vec[i + 2], vec[i + 3]);
+        while i < vec.len() {
+            if let Some(marker) = bytes_to_marker(&vec[i..]) {
+                if marker == Marker::EndOfImage {
+                    // These are the last bytes, so it must be checked before
+                    // `let data_length = ...` in order to avoid out-of-bounds indexes.
+                    break;
+                }
 
-            if let Some(marker) = marker {
-                println!("{:?}, i={}, len={}", marker, i, data_length);
+                // NOTE: this does not count the length bytes anymore!
+                // TODO: Maybe do count them? In order to make it less confusing
+                let data_length = ((vec[i + 2] as usize) << 8) + vec[i + 3] as usize - 2;
+
                 match marker {
                     Marker::Comment => {
                         // Comment
@@ -284,7 +297,6 @@ impl JFIFImage {
                             image_components: image_components,
                             frame_components: frame_components,
                         };
-                        println!("{:#?}", frame_header);
                         jfif_image.dimensions = (samples_per_line, num_lines);
                         jfif_image.frame_header = Some(frame_header)
                     }
@@ -316,9 +328,6 @@ impl JFIFImage {
 
                             let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                       data_area);
-                            if debug {
-                                huffman_table.print_table();
-                            }
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                     Some(huffman_table);
@@ -359,7 +368,6 @@ impl JFIFImage {
                             successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                             successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                         };
-                        println!("{:#?}", scan_header);
                         i += 8;
                         // `i` is now at the head of the data.
 
@@ -386,6 +394,7 @@ impl JFIFImage {
 
 
                         // Copy data, and replace 0xff00 with 0xff.
+                        let mut bytes_skipped = 0;
                         let mut encoded_data = Vec::new();
                         {
                             let mut i = i;
@@ -394,6 +403,7 @@ impl JFIFImage {
                                 if vec[i] == 0xff && vec[i + 1] == 0x00 {
                                     // Skip the 0x00 part here.
                                     i += 1;
+                                    bytes_skipped += 1;
                                 }
                                 i += 1;
                             }
@@ -407,6 +417,7 @@ impl JFIFImage {
                             .dimensions((jfif_image.dimensions.0 as usize,
                                          jfif_image.dimensions.1 as usize));
 
+                        // Add tables to `jpeg_decoder`
                         for (i, table) in jfif_image.huffman_ac_tables.iter().enumerate() {
                             if let &Some(ref table) = table {
                                 jpeg_decoder.huffman_ac_tables(i as u8, table.clone());
@@ -425,10 +436,11 @@ impl JFIFImage {
                             }
                         }
 
-                        let image_data = jpeg_decoder.decode();
+                        let (image_data, bytes_read) = jpeg_decoder.decode();
                         jfif_image.image_data = Some(image_data);
 
-                        break;
+                        i += bytes_read + bytes_skipped;
+                        continue;
                     }
                     Marker::RestartIntervalDefinition => {
                         // Restart Interval Definition
@@ -449,129 +461,20 @@ impl JFIFImage {
                         // Application segment 14
                         println!("got {:?}", marker);
                     }
+
+                    // Already handled
+                    Marker::EndOfImage => {}
                 }
+                i += 4 + data_length;
             } else {
                 println!("\n\nUnhandled byte marker: {:02x} {:02x}",
                          vec[i],
                          vec[i + 1]);
                 println!("i = {}", i);
                 println!("Total vector len = {}", vec.len());
-                println!("len={}", data_length);
-                print_vector(vec.iter().skip(i));
-                break;
+                panic!();
             }
-            i += 4 + data_length;
         }
         Ok(jfif_image)
     }
-}
-
-// TODO: Remove (or move?)
-use std::fmt::LowerHex;
-#[allow(dead_code)]
-fn print_vector<I>(iter: I)
-    where I: Iterator,
-          I::Item: LowerHex
-{
-    let mut i = 0;
-    for byte in iter.take(128) {
-        i += 1;
-        print!("{:02x} ", byte);
-        if i % 16 == 0 && i != 0 {
-            print!("\n");
-        }
-    }
-    if i % 16 != 0 || i == 0 {
-        print!("\n");
-    }
-}
-
-use std::fmt::Binary;
-#[allow(dead_code)]
-fn print_vector_bin<I>(iter: I)
-    where I: Iterator,
-          I::Item: Binary
-{
-    let mut i = 0;
-    for byte in iter.take(8) {
-        i += 1;
-        print!("{:08b} ", byte);
-        if i % 8 == 0 && i != 0 {
-            print!("\n");
-        }
-    }
-    if i % 8 != 0 || i == 0 {
-        print!("\n");
-    }
-}
-
-use std::fmt::Display;
-#[allow(dead_code)]
-fn print_vector_dec<I>(iter: I)
-    where I: Iterator,
-          I::Item: Display
-{
-    let mut i = 0;
-    for byte in iter.take(64) {
-        i += 1;
-        print!("{:8.2} ", byte);
-        if i % 8 == 0 && i != 0 {
-            print!("\n");
-        }
-    }
-    if i % 8 != 0 || i == 0 {
-        print!("\n");
-    }
-}
-
-/// Turn a vector representing a Matrix into 'zigzag' order.
-///
-/// ```
-///  0  1  2  3
-///  4  5  6  7
-///  8  9 10 11
-/// 12 13 14 15
-///
-/// becomes
-///
-///  0  1  5  6
-///  2  4  7 12
-///  3  8 11 13
-///  9 10 14 15
-/// ```
-///
-// hardcode dis shit lol
-const ZIGZAG_INDICES: [usize; 64] =
-    [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27,
-     20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58,
-     59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
-#[allow(dead_code)]
-fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
-    where T: Copy
-{
-    if vec.len() != 64 {
-        panic!("I took a shortcut in zigzag()! Please implement me properly :) (len={})",
-               vec.len());
-    }
-    let mut res = Vec::with_capacity(64);
-    for &i in ZIGZAG_INDICES.iter() {
-        res.push(vec[i]);
-    }
-    res
-}
-
-#[allow(dead_code)]
-fn zigzag_inverse<T>(vec: &Vec<T>) -> Vec<T>
-    where T: Copy,
-          T: Default
-{
-    if vec.len() != 64 {
-        panic!("I took a shortcut in zigzag()! Please implement me properly :) (len={})",
-               vec.len());
-    }
-    let mut res: Vec<T> = repeat(Default::default()).take(64).collect();
-    for (i, &n) in ZIGZAG_INDICES.iter().enumerate() {
-        res[n] = vec[i];
-    }
-    res
 }
