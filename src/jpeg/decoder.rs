@@ -164,10 +164,6 @@ impl<'a> JPEGDecoder<'a> {
 
         let num_components = self.component_fields.len();
 
-        let mut scan_state = huffman::ScanState {
-            index: 0,
-            bits_read: 0,
-        };
         // 2D vector, one vector for each component.
         let mut blocks: Vec<Vec<Block>> = (0..self.component_fields.len())
             .map(|_| vec![])
@@ -190,10 +186,9 @@ impl<'a> JPEGDecoder<'a> {
 
                 for _ in 0..component.horizontal_sampling_factor {
                     let mut decoded_block: Vec<f32> = huffman_decoder.next_block(ac_table, dc_table)
-                        // huffman::decode(ac_table, dc_table, &self.data, &mut scan_state)
-                             .iter()
-                             .map(|&i| i as f32)
-                             .collect();
+                        .iter()
+                        .map(|&i| i as f32)
+                        .collect();
 
                     // DC correction
                     let encoded = decoded_block[0];
