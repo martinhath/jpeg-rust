@@ -182,25 +182,40 @@ impl JFIFImage {
         self.image_data.as_ref()
     }
 
-    pub fn parse(vec: Vec<u8>, output_filename: &str) -> Result<JFIFImage, String> {
+    /// See if the bytes stream passed in is a JFIF file.
+    fn recognize_jfif(bytes: &[u8]) -> bool {
         // you can identify a JFIF file by looking for the following sequence:
         //
         //      X'FF', SOI, X'FF', APP0, <2 bytes to be skipped>, "JFIF", X'00'.
+        //
+        // I'm not even sure which version is uglier: this,
+        // or just checking `bytes[0] == 0xff && bytes[1] == ...`
+        if bytes.len() < 11 {
+            return false;
+        }
+        let jfif_format: [u8; 11] = [0xff, 0xd8, 0xff, 0xe0, 0, 0, 'J' as u8, 'F' as u8,
+                                     'I' as u8, 'F' as u8, 0x00];
+        let jfif_mask: [bool; 11] = [true, true, true, true, false, false, true, true, true, true,
+                                     true];
+        jfif_format.iter()
+            .zip(jfif_mask.iter())
+            .zip(bytes.iter())
+            .all(|((&n, &include), &byte)| !include || n == byte)
+    }
+
+    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
         if vec.len() < 11 {
             return Err("input is too short".to_string());
         }
-        let soi = 0xd8;
-        let app_0 = 0xe0;
-        if vec[0] != 0xff || vec[1] != soi || vec[2] != 0xff || vec[3] != app_0 ||
-           vec[6] != 'J' as u8 || vec[7] != 'F' as u8 || vec[8] != 'I' as u8 ||
-           vec[9] != 'F' as u8 || vec[10] != 0x00 {
-            return Err("Header mismatch".to_string());
+        if !JFIFImage::recognize_jfif(vec.as_slice()) {
+            return Err("File is not a JPEG/JFIF file".to_string());
         }
         let version = try!(JFIFVersion::from_bytes(vec[11], vec[12]));
-
         let units = try!(JFIFUnits::from_u8(vec[13]));
+
         let x_density = u8s_to_u16(&vec[14..16]);
         let y_density = u8s_to_u16(&vec[16..18]);
+
         let thumbnail_dimensions = (vec[18], vec[19]);
 
         // TODO: thumbnail data?

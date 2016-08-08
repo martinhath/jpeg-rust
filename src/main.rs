@@ -28,7 +28,7 @@ fn main() {
     let output_file = args.next().expect("Must supply an output file");
 
     let bytes = file_to_bytes(Path::new(&input_file));
-    let image = JFIFImage::parse(bytes, &output_file).unwrap();
+    let image = JFIFImage::parse(bytes).unwrap();
     // Show the image, somehow.
 
     let mut file = File::create(output_file).unwrap();
