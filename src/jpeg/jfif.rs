@@ -55,12 +55,14 @@ pub struct JFIFImage {
     version: JFIFVersion,
     /// TODO:
     units: JFIFUnits,
+    /// TODO:
+    pixel_density: (u16, u16),
     /// Image dimensions
     dimensions: JPEGDimensions,
     /// Dimensions of the thumbnail, if present
     /// TODO: add thumbnail.
     /// Maybe join image data and dimensions to one struct?
-    thumbnail_dimensions: Option<ThumbnailDimensions>,
+    thumbnail_dimensions: ThumbnailDimensions,
     /// Optional comment
     comment: Option<String>,
     /// huffman tables for AC coefficients
@@ -210,6 +212,7 @@ impl JFIFImage {
         if !JFIFImage::recognize_jfif(vec.as_slice()) {
             return Err("File is not a JPEG/JFIF file".to_string());
         }
+
         let version = try!(JFIFVersion::from_bytes(vec[11], vec[12]));
         let units = try!(JFIFUnits::from_u8(vec[13]));
 
@@ -223,8 +226,9 @@ impl JFIFImage {
         let mut jfif_image = JFIFImage {
             version: version,
             units: units,
-            dimensions: (x_density, y_density),
-            thumbnail_dimensions: Some(thumbnail_dimensions),
+            pixel_density: (x_density, y_density),
+            dimensions: (0, 0),
+            thumbnail_dimensions: thumbnail_dimensions,
             comment: None,
             huffman_ac_tables: [None, None, None, None],
             huffman_dc_tables: [None, None, None, None],
