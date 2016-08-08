@@ -71,6 +71,7 @@ pub struct JFIFImage {
     quantization_tables: [Option<Vec<u8>>; 4],
     /// Frame header data
     frame_header: Option<FrameHeader>,
+    scan_headers: Vec<ScanHeader>,
     /// Actual image data.
     /// NOTE: only support 8-bit precision
     /// TODO: Add support for other precisions
@@ -103,7 +104,7 @@ pub struct FrameComponentHeader {
     pub quantization_selector: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ScanHeader {
     /// Number of components in the scan.
     num_components: u8,
@@ -214,6 +215,7 @@ impl JFIFImage {
             huffman_dc_tables: [None, None, None, None],
             quantization_tables: [None, None, None, None],
             frame_header: None,
+            scan_headers: vec![],
             image_data: None,
         };
 
@@ -337,9 +339,9 @@ impl JFIFImage {
                             }
                         }
                         if huffman_index != target_index {
-                            panic!("Read too much while parsing huffman tables! {}/{}",
-                                   huffman_index,
-                                   target_index);
+                            println!("Read too much while parsing huffman tables! {}/{}",
+                                     huffman_index,
+                                     target_index);
                         }
                     }
                     Marker::StartOfScan => {
@@ -368,6 +370,7 @@ impl JFIFImage {
                             successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                             successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                         };
+                        jfif_image.scan_headers.push(scan_header.clone());
                         i += 8;
                         // `i` is now at the head of the data.
 
@@ -413,7 +416,8 @@ impl JFIFImage {
                         let frame_header = jfif_image.frame_header.clone().unwrap();
                         let mut jpeg_decoder = JPEGDecoder::new(encoded_data.as_slice())
                             .frame_header(frame_header)
-                            .scan_header(scan_header)
+                            // need `.clone()`, or we hit some LLVM bug??
+                            .scan_header(scan_header.clone())
                             .dimensions((jfif_image.dimensions.0 as usize,
                                          jfif_image.dimensions.1 as usize));
 
@@ -446,7 +450,7 @@ impl JFIFImage {
                         // Restart Interval Definition
                         // JPEG B.2.4.4
                         // TODO: support this
-                        panic!("got to restart interval def")
+                        println!("got to restart interval def")
                     }
                     Marker::ApplicationSegment12 => {
                         // Application segment 12
@@ -461,7 +465,6 @@ impl JFIFImage {
                         // Application segment 14
                         println!("got {:?}", marker);
                     }
-
                     // Already handled
                     Marker::EndOfImage => {}
                 }
@@ -470,9 +473,6 @@ impl JFIFImage {
                 println!("\n\nUnhandled byte marker: {:02x} {:02x}",
                          vec[i],
                          vec[i + 1]);
-                println!("i = {}", i);
-                println!("Total vector len = {}", vec.len());
-                panic!();
             }
         }
         Ok(jfif_image)
