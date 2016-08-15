@@ -213,6 +213,9 @@ impl JFIFImage {
             return Err("File is not a JPEG/JFIF file".to_string());
         }
 
+        // TODO: Add JFIFHeader ?, and split JPEG stuff and JFIF stuff?
+        // Might be a good idea.
+
         let version = try!(JFIFVersion::from_bytes(vec[11], vec[12]));
         let units = try!(JFIFUnits::from_u8(vec[13]));
 
