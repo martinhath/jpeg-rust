@@ -71,8 +71,8 @@ impl Table {
                 code_length_index[(current_length - 2) as usize] = (current_start, i + 1);
             }
         }
-        let s = code_length_index.iter().map(|&(a, b)| b - a).fold(0, |a, b| a + b);
-        assert!(codes.len() == s);
+        // Make sure we didn't lose any codes
+        assert!(codes.len() == code_length_index.iter().map(|&(a, b)| b - a).fold(0, |a, b| a + b));
 
         Table {
             codes: codes,
@@ -108,6 +108,8 @@ impl Table {
     /// Take a size table, and return a `Vec<u16>` of codes,
     /// such that code `i` has the value `vec[i]`.
     fn make_code_table(size_table: &[u8]) -> Vec<u16> {
+        // This is more or less just an implementation of a
+        // flowchart (Figure C.2) in the standard.
         let mut codes = Vec::new();
 
         let mut k = 0;
