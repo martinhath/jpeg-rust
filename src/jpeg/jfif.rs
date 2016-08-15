@@ -13,16 +13,17 @@ pub enum JFIFUnits {
     NoUnits,
     DotsPerInch,
     DotsPerCm,
+    Unknown(u8),
 }
 
 impl JFIFUnits {
-    pub fn from_u8(byte: u8) -> Result<JFIFUnits, String> {
-        Ok(match byte {
+    pub fn from_u8(byte: u8) -> JFIFUnits {
+        match byte {
             1 => JFIFUnits::NoUnits,
             2 => JFIFUnits::DotsPerInch,
             3 => JFIFUnits::DotsPerCm,
-            _ => return Err(format!("Illegal unit byte: {}", byte)),
-        })
+            _ => JFIFUnits::Unknown(byte),
+        }
     }
 }
 
@@ -31,15 +32,16 @@ impl JFIFUnits {
 pub enum JFIFVersion {
     V1_01,
     V1_02,
+    Unknown(u8, u8),
 }
 
 impl JFIFVersion {
-    pub fn from_bytes(msb: u8, lsb: u8) -> Result<JFIFVersion, String> {
-        Ok(match (msb, lsb) {
+    pub fn from_bytes(msb: u8, lsb: u8) -> JFIFVersion {
+        match (msb, lsb) {
             (1, 1) => JFIFVersion::V1_01,
             (1, 2) => JFIFVersion::V1_02,
-            _ => return Err(format!("Unknown version: ({}, {})", msb, lsb)),
-        })
+            _ => JFIFVersion::Unknown(msb, lsb),
+        }
     }
 }
 
@@ -73,7 +75,7 @@ pub struct JFIFImage {
     quantization_tables: [Option<Vec<u8>>; 4],
     /// Frame header data
     frame_header: Option<FrameHeader>,
-    scan_headers: Vec<ScanHeader>,
+    scan_headers: Option<Vec<ScanHeader>>,
     /// Actual image data.
     /// NOTE: only support 8-bit precision
     /// TODO: Add support for other precisions
@@ -141,8 +143,10 @@ enum Marker {
     QuantizationTable,
     BaselineDCT,
     RestartIntervalDefinition,
+    ApplicationSegment0,
     ApplicationSegment12,
     ApplicationSegment14,
+    StartOfImage,
     EndOfImage,
 }
 
@@ -158,10 +162,12 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
     let marker = match n {
         0xc0 => BaselineDCT,
         0xc4 => DefineHuffmanTable,
+        0xd8 => StartOfImage,
         0xd9 => EndOfImage,
         0xda => StartOfScan,
         0xdb => QuantizationTable,
         0xdd => RestartIntervalDefinition,
+        0xe0 => ApplicationSegment0,
         0xec => ApplicationSegment12,
         0xee => ApplicationSegment14,
         0xfe => Comment,
@@ -172,89 +178,40 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
 
 #[allow(unused_variables)]
 impl JFIFImage {
-    pub fn width(&self) -> usize {
-        self.dimensions.0 as usize
-    }
-
-    pub fn height(&self) -> usize {
-        self.dimensions.1 as usize
-    }
-
-    pub fn image_data(&self) -> Option<&Vec<(u8, u8, u8)>> {
-        self.image_data.as_ref()
-    }
-
-    /// See if the bytes stream passed in is a JFIF file.
-    fn recognize_jfif(bytes: &[u8]) -> bool {
-        // you can identify a JFIF file by looking for the following sequence:
-        //
-        //      X'FF', SOI, X'FF', APP0, <2 bytes to be skipped>, "JFIF", X'00'.
-        //
-        // I'm not even sure which version is uglier: this,
-        // or just checking `bytes[0] == 0xff && bytes[1] == ...`
-        if bytes.len() < 11 {
-            return false;
-        }
-        let jfif_format: [u8; 11] = [0xff, 0xd8, 0xff, 0xe0, 0, 0, 'J' as u8, 'F' as u8,
-                                     'I' as u8, 'F' as u8, 0x00];
-        let jfif_mask: [bool; 11] = [true, true, true, true, false, false, true, true, true, true,
-                                     true];
-        jfif_format.iter()
-            .zip(jfif_mask.iter())
-            .zip(bytes.iter())
-            .all(|((&n, &include), &byte)| !include || n == byte)
-    }
-
-    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
-        if vec.len() < 11 {
-            return Err("input is too short".to_string());
-        }
-        if !JFIFImage::recognize_jfif(vec.as_slice()) {
-            return Err("File is not a JPEG/JFIF file".to_string());
-        }
-
-        // TODO: Add JFIFHeader ?, and split JPEG stuff and JFIF stuff?
-        // Might be a good idea.
-
-        let version = try!(JFIFVersion::from_bytes(vec[11], vec[12]));
-        let units = try!(JFIFUnits::from_u8(vec[13]));
-
-        let x_density = u8s_to_u16(&vec[14..16]);
-        let y_density = u8s_to_u16(&vec[16..18]);
-
-        let thumbnail_dimensions = (vec[18], vec[19]);
-
-        // TODO: thumbnail data?
-
-        let mut jfif_image = JFIFImage {
-            version: version,
-            units: units,
-            pixel_density: (x_density, y_density),
+    fn new() -> JFIFImage {
+        JFIFImage {
+            version: JFIFVersion::Unknown(0, 0),
+            units: JFIFUnits::Unknown(0),
+            pixel_density: (0, 0),
             dimensions: (0, 0),
-            thumbnail_dimensions: thumbnail_dimensions,
+            thumbnail_dimensions: (0, 0),
             comment: None,
             huffman_ac_tables: [None, None, None, None],
             huffman_dc_tables: [None, None, None, None],
             quantization_tables: [None, None, None, None],
             frame_header: None,
-            scan_headers: vec![],
+            scan_headers: None,
             image_data: None,
-        };
+        }
+    }
 
-        let bytes_to_len = |a: u8, b: u8| ((a as usize) << 8) + b as usize - 2;
+    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
+        let mut jfif_image = JFIFImage::new();
 
-        let mut i = 20;
+        let mut i = 0;
         while i < vec.len() {
             if let Some(marker) = bytes_to_marker(&vec[i..]) {
-                if marker == Marker::EndOfImage {
-                    // These are the last bytes, so it must be checked before
-                    // `let data_length = ...` in order to avoid out-of-bounds indexes.
-                    break;
+                if marker == Marker::EndOfImage || marker == Marker::StartOfImage {
+                    // These markers doesn't have length bytes, so they must be
+                    // handled separately, in order to to avoid out-of-bounds indexes,
+                    // or reading nonsense lengths.
+                    i += 2;
+                    continue;
                 }
 
                 // NOTE: this does not count the length bytes anymore!
                 // TODO: Maybe do count them? In order to make it less confusing
-                let data_length = ((vec[i + 2] as usize) << 8) + vec[i + 3] as usize - 2;
+                let data_length = (u8s_to_u16(&vec[i + 2..]) - 2) as usize;
 
                 match marker {
                     Marker::Comment => {
@@ -327,13 +284,13 @@ impl JFIFImage {
                     Marker::DefineHuffmanTable => {
                         // Define Huffman table
                         // JPEG B.2.4.2
-                        // DC = 0, AC = 1
 
                         let mut huffman_index = i + 4;
                         let target_index = i + 4 + data_length;
                         // Read tables untill the segment is done
 
                         while huffman_index < target_index {
+                            // DC = 0, AC = 1
                             let table_class = (vec[huffman_index] & 0xf0) >> 4;
                             let table_dest_id = vec[huffman_index] & 0x0f;
                             huffman_index += 1;
@@ -392,7 +349,12 @@ impl JFIFImage {
                             successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                             successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                         };
-                        jfif_image.scan_headers.push(scan_header.clone());
+                        if jfif_image.scan_headers.is_none() {
+                            jfif_image.scan_headers = Some(Vec::new());
+                        }
+                        jfif_image.scan_headers
+                            .as_mut()
+                            .map(|v| v.push(scan_header.clone()));
                         i += 8;
                         // `i` is now at the head of the data.
 
@@ -472,7 +434,23 @@ impl JFIFImage {
                         // Restart Interval Definition
                         // JPEG B.2.4.4
                         // TODO: support this
-                        println!("got to restart interval def")
+                        panic!("got to restart interval def")
+                    }
+                    Marker::ApplicationSegment0 => {
+                        // JFIF puts stuff here.
+                        //
+                        //
+                        //  X’FF’, APP0, length, identifier, version, units,
+                        //  Xdensity, Ydensity, Xthumbnail, Ythumbnail, (RGB)n
+
+                        let identifier = &vec[i + 4..i + 10];
+                        let version = JFIFVersion::from_bytes(vec[11], vec[12]);
+                        let units = JFIFUnits::from_u8(vec[13]);
+
+                        let x_density = u8s_to_u16(&vec[14..16]);
+                        let y_density = u8s_to_u16(&vec[16..18]);
+
+                        let thumbnail_dimensions = (vec[18], vec[19]);
                     }
                     Marker::ApplicationSegment12 => {
                         // Application segment 12
@@ -481,13 +459,14 @@ impl JFIFImage {
                         //      http://wooyaggo.tistory.com/104
                         //
                         // TODO: should clear this up.
-                        println!("got {:?}", marker);
+                        panic!("got {:?}", marker);
                     }
                     Marker::ApplicationSegment14 => {
                         // Application segment 14
-                        println!("got {:?}", marker);
+                        panic!("got {:?}", marker);
                     }
                     // Already handled
+                    Marker::StartOfImage => {}
                     Marker::EndOfImage => {}
                 }
                 i += 4 + data_length;
@@ -498,5 +477,17 @@ impl JFIFImage {
             }
         }
         Ok(jfif_image)
+    }
+
+    pub fn width(&self) -> usize {
+        self.dimensions.0 as usize
+    }
+
+    pub fn height(&self) -> usize {
+        self.dimensions.1 as usize
+    }
+
+    pub fn image_data(&self) -> Option<&Vec<(u8, u8, u8)>> {
+        self.image_data.as_ref()
     }
 }
