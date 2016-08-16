@@ -292,8 +292,8 @@ impl JFIFImage {
                             let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
                             huffman_index += 16;
 
-                            let number_of_codes =
-                                size_area.iter().fold(0u8, |a, b| a + *b) as usize;
+                            let number_of_codes = size_area.iter()
+                                .fold(0, |a, b| a + (*b as usize));
 
                             // Code `i` has value `data_area[i]`
                             let data_area: &[u8] = &vec[huffman_index..huffman_index +
@@ -309,11 +309,6 @@ impl JFIFImage {
                                 jfif_image.huffman_ac_tables[table_dest_id as usize] =
                                     Some(huffman_table);
                             }
-                        }
-                        if huffman_index != target_index {
-                            println!("Read too much while parsing huffman tables! {}/{}",
-                                     huffman_index,
-                                     target_index);
                         }
                     }
                     Marker::StartOfScan => {
