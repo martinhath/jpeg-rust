@@ -1,6 +1,5 @@
 use std::iter::repeat;
 use std::iter;
-use std::slice;
 use std::cmp::min;
 
 // Selects i bits, from msb to lsb.
@@ -13,15 +12,19 @@ const BIT_MASKS: [u16; 17] = [0x0, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC0
 
 #[derive(Debug, Clone)]
 pub struct Code {
+    /// How many bits are used in the code
     length: u8,
+    /// The bit code. If the number of bits used to represent the code is less
+    /// than `length`, prepend `len-length` `0`s in front.
     code: u16,
+    /// The value the code is mapped to.
     value: u8,
 }
 
 #[derive(Debug)]
 pub struct Table {
+    /// A list of all codes in the table, sorted on code length
     codes: Vec<Code>,
-    code_length_index: Vec<(usize, usize)>,
 }
 
 impl Table {
@@ -50,35 +53,24 @@ impl Table {
             })
             .collect();
 
-        // Find slice indices for each length, so we don't need to search
-        // though the whole `codes` vecs when we want to get all codes
-        // of length `n`.
-        let mut code_length_index: Vec<(usize, usize)> = repeat((0, 0)).take(16).collect();
-        {
-            let mut current_start = 0;
-            let mut current_length = 2;
-            for (i, code) in codes.iter().enumerate() {
-                if current_length != code.length {
-                    current_length = code.length;
-                    current_start = i;
-                }
-                code_length_index[(current_length - 2) as usize] = (current_start, i + 1);
-            }
-        }
-        // Make sure we didn't lose any codes
-        assert!(codes.len() == code_length_index.iter().map(|&(a, b)| b - a).fold(0, |a, b| a + b));
-
-        Table {
-            codes: codes,
-            code_length_index: code_length_index,
-        }
+        Table { codes: codes }
     }
 
     pub fn codes_of_length(&self, len: usize) -> &[Code] {
         assert!(len >= 2);
         assert!(len < 17);
-        let (a, b) = self.code_length_index[len - 2];
-
+        let len_u8 = len as u8;
+        let mut codes_of_length = self.codes
+            .iter()
+            .enumerate()
+            .skip_while(|&(i, code)| code.length != len_u8)
+            .take_while(|&(i, code)| code.length == len_u8);
+        let (a, b) = if let Some(a) = codes_of_length.next().map(|(i, code)| i) {
+            let b = codes_of_length.last().map(|(i, code)| i).unwrap_or(a) + 1;
+            (a, b)
+        } else {
+            (0, 0)
+        };
         &self.codes[a..b]
     }
 
@@ -133,10 +125,7 @@ impl Table {
 
 impl Clone for Table {
     fn clone(&self) -> Table {
-        Table {
-            codes: self.codes.iter().cloned().collect(),
-            code_length_index: self.code_length_index.iter().cloned().collect(),
-        }
+        Table { codes: self.codes.iter().cloned().collect() }
     }
 }
 
