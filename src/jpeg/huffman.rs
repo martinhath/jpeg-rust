@@ -30,19 +30,22 @@ pub struct Table {
 impl Table {
     /// Create a Huffman table from a size table and a corresponding data table.
     ///
-    /// The size table describes how many codes there are of a given size. For
+    /// The size data describes how many codes there are of a given size. For
     /// each `i`, there are `size_table[i - 1]` codes, `1 <= i <= 16`.
     ///
     /// The data table describes the value of these codes. Code number `i` has
     /// the value `data_table[i]`.
     pub fn from_size_data_tables(size_data: &[u8], data_table: &[u8]) -> Table {
         // id -> code length
-        let size_table: Vec<u8> = Table::make_size_table(&size_data);
+        let code_lengths: Vec<u8> = (0..16)
+            .flat_map(|i| repeat(i as u8 + 1).take(size_data[i] as usize))
+            .chain(iter::once(0))
+            .collect();
         // id -> 0b10101
-        let code_table: Vec<u16> = Table::make_code_table(&size_table);
+        let code_table: Vec<u16> = Table::make_code_table(&code_lengths);
 
         let codes: Vec<Code> = data_table.iter()
-            .zip(size_table.iter())
+            .zip(code_lengths.iter())
             .zip(code_table.iter())
             .map(|((&value, &length), &code)| {
                 Code {
@@ -63,10 +66,10 @@ impl Table {
         let mut codes_of_length = self.codes
             .iter()
             .enumerate()
-            .skip_while(|&(i, code)| code.length != len_u8)
-            .take_while(|&(i, code)| code.length == len_u8);
-        let (a, b) = if let Some(a) = codes_of_length.next().map(|(i, code)| i) {
-            let b = codes_of_length.last().map(|(i, code)| i).unwrap_or(a) + 1;
+            .skip_while(|&(_, code)| code.length != len_u8)
+            .take_while(|&(_, code)| code.length == len_u8);
+        let (a, b) = if let Some(a) = codes_of_length.next().map(|(i, _)| i) {
+            let b = codes_of_length.last().map(|(i, _)| i).unwrap_or(a) + 1;
             (a, b)
         } else {
             (0, 0)
@@ -74,52 +77,23 @@ impl Table {
         &self.codes[a..b]
     }
 
-    /// Take a list of sizes, such that there are `bytes[i]` codes
-    /// of size `i + 1`, and return a `Vec<u8>` of sizes such that
-    /// code `i` is of size `vec[i]`.
-    fn make_size_table(bytes: &[u8]) -> Vec<u8> {
-        // See JPEG C.2
-        (0..16)
-            .flat_map(|i| repeat(i as u8 + 1).take(bytes[i] as usize))
-            .chain(iter::once(0))
-            .collect()
-    }
-
     /// Take a size table, and return a `Vec<u16>` of codes,
     /// such that code `i` has the value `vec[i]`.
-    fn make_code_table(size_table: &[u8]) -> Vec<u16> {
+    fn make_code_table(sizes: &[u8]) -> Vec<u16> {
         // This is more or less just an implementation of a
         // flowchart (Figure C.2) in the standard.
-        let mut codes = Vec::new();
-
-        let mut k = 0;
-        let mut code: u16 = 0;
-        let mut si = size_table[0] as usize;
-
-        loop {
-            codes.push(code);
+        let mut vec = Vec::new();
+        let mut code = 0;
+        let mut current_size = sizes[0];
+        for &size in sizes {
+            while size > current_size {
+                code <<= 1;
+                current_size += 1;
+            }
+            vec.push(code);
             code += 1;
-            k += 1;
-
-            let size_k = size_table[k] as usize;
-            if size_k == si {
-                continue;
-            }
-
-            if size_k == 0 {
-                break;
-            }
-
-            // NOTE: this is a do-while loop :)
-            while {
-                // do
-                code = code << 1;
-                si += 1;
-                // while
-                size_k != si
-            } {}
         }
-        codes
+        vec
     }
 }
 
