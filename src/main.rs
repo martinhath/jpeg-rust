@@ -11,14 +11,12 @@ use std::path::Path;
 
 use jpeg::jfif::*;
 
-fn file_to_bytes(path: &Path) -> Vec<u8> {
-    if let Ok(file) = File::open(path) {
-        return file.bytes()
-            .filter(Result::is_ok)
-            .map(Result::unwrap)
-            .collect();
-    }
-    panic!("Coult not open file.")
+fn file_to_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
+    File::open(path).map(|file| {
+        file.bytes()
+            .flat_map(|b| b.ok())
+            .collect()
+    })
 }
 
 fn main() {
@@ -27,7 +25,7 @@ fn main() {
     let input_file = args.next().expect("Must supply an input file");
     let output_file = args.next().expect("Must supply an output file");
 
-    let bytes = file_to_bytes(Path::new(&input_file));
+    let bytes = file_to_bytes(Path::new(&input_file)).unwrap();
     let image = JFIFImage::parse(bytes).unwrap();
     // Show the image, somehow.
 

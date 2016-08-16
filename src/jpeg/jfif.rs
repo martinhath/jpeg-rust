@@ -215,7 +215,6 @@ impl JFIFImage {
 
                 match marker {
                     Marker::Comment => {
-                        // Comment
                         use std::str;
                         let comment: String = match str::from_utf8(&vec[i + 4..i + 4 +
                                                                                data_length]) {
@@ -227,28 +226,23 @@ impl JFIFImage {
                         };
                     }
                     Marker::QuantizationTable => {
-                        // Quantization tables
                         // JPEG B.2.4.1
-
                         let mut index = i + 4;
                         while index < i + 4 + data_length {
                             let precision = (vec[index] & 0xf0) >> 4;
+                            assert!(precision == 0);
                             let identifier = vec[index] & 0x0f;
-
-                            // TODO: we probably dont need to copy and collect here.
-                            // Would rather have a slice in quant_tables, with a
-                            // lifetime the same as jfif_image (?)
                             let table: Vec<u8> = vec[index + 1..]
                                 .iter()
                                 .take(64)
-                                .map(|u| *u)
+                                .cloned()
                                 .collect();
+
                             jfif_image.quantization_tables[identifier as usize] = Some(table);
                             index += 65; // 64 entries + one header byte
                         }
                     }
                     Marker::BaselineDCT => {
-                        // Baseline DCT
                         // JPEG B.2.2
                         let sample_precision = vec[i + 4];
                         let num_lines = u8s_to_u16(&vec[i + 5..]);
@@ -282,7 +276,6 @@ impl JFIFImage {
                         jfif_image.frame_header = Some(frame_header)
                     }
                     Marker::DefineHuffmanTable => {
-                        // Define Huffman table
                         // JPEG B.2.4.2
 
                         let mut huffman_index = i + 4;
@@ -324,7 +317,6 @@ impl JFIFImage {
                         }
                     }
                     Marker::StartOfScan => {
-                        // Start of Scan
                         // JPEG B.2.3
 
                         let num_components = vec[i + 4];
@@ -431,7 +423,6 @@ impl JFIFImage {
                         continue;
                     }
                     Marker::RestartIntervalDefinition => {
-                        // Restart Interval Definition
                         // JPEG B.2.4.4
                         // TODO: support this
                         panic!("got to restart interval def")
@@ -453,16 +444,9 @@ impl JFIFImage {
                         let thumbnail_dimensions = (vec[18], vec[19]);
                     }
                     Marker::ApplicationSegment12 => {
-                        // Application segment 12
-                        // Not to be found in the standard?
-                        //
-                        //      http://wooyaggo.tistory.com/104
-                        //
-                        // TODO: should clear this up.
                         panic!("got {:?}", marker);
                     }
                     Marker::ApplicationSegment14 => {
-                        // Application segment 14
                         panic!("got {:?}", marker);
                     }
                     // Already handled
@@ -471,9 +455,9 @@ impl JFIFImage {
                 }
                 i += 4 + data_length;
             } else {
-                println!("\n\nUnhandled byte marker: {:02x} {:02x}",
-                         vec[i],
-                         vec[i + 1]);
+                panic!("\n\nUnhandled byte marker: {:02x} {:02x}",
+                       vec[i],
+                       vec[i + 1]);
             }
         }
         Ok(jfif_image)
