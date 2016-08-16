@@ -24,8 +24,6 @@ pub struct Table {
     code_length_index: Vec<(usize, usize)>,
 }
 
-type CodeIter<'a> = iter::TakeWhile<iter::Skip<slice::Iter<'a, Code>>, (fn(Code) -> bool)>;
-
 impl Table {
     /// Create a Huffman table from a size table and a corresponding data table.
     ///
@@ -35,10 +33,6 @@ impl Table {
     /// The data table describes the value of these codes. Code number `i` has
     /// the value `data_table[i]`.
     pub fn from_size_data_tables(size_data: &[u8], data_table: &[u8]) -> Table {
-        // We use `id` to mark code number,
-        // such that size_table maps code number to length of that code,
-        // and code_table maps code number to code value.
-
         // id -> code length
         let size_table: Vec<u8> = Table::make_size_table(&size_data);
         // id -> 0b10101
@@ -93,16 +87,10 @@ impl Table {
     /// code `i` is of size `vec[i]`.
     fn make_size_table(bytes: &[u8]) -> Vec<u8> {
         // See JPEG C.2
-        // TODO: Check out LASTK ?
-        let mut vec = Vec::new();
-        for i in 0..16 {
-            let num_codes_of_size = bytes[i] as usize;
-            for _ in 0..num_codes_of_size {
-                vec.push(i as u8 + 1);
-            }
-        }
-        vec.push(0);
-        vec
+        (0..16)
+            .flat_map(|i| repeat(i as u8 + 1).take(bytes[i] as usize))
+            .chain(iter::once(0))
+            .collect()
     }
 
     /// Take a size table, and return a `Vec<u16>` of codes,
