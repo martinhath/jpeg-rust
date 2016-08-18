@@ -1,6 +1,8 @@
 use jpeg::huffman;
 use jpeg::decoder::JPEGDecoder;
 
+use std::str;
+
 // TODO: move this?
 fn u8s_to_u16(bytes: &[u8]) -> u16 {
     let msb = bytes[0] as u16;
@@ -215,15 +217,10 @@ impl JFIFImage {
 
                 match marker {
                     Marker::Comment => {
-                        use std::str;
-                        let comment: String = match str::from_utf8(&vec[i + 4..i + 4 +
-                                                                               data_length]) {
-                            Ok(s) => s.to_string(),
-                            Err(e) => {
-                                println!("{}", e);
-                                "".to_string()
-                            }
-                        };
+                        let comment = str::from_utf8(&vec[i + 4..i + 4 + data_length])
+                            .map(|s| s.to_string())
+                            .ok();
+                        jfif_image.comment = comment;
                     }
                     Marker::QuantizationTable => {
                         // JPEG B.2.4.1
@@ -313,7 +310,6 @@ impl JFIFImage {
                     }
                     Marker::StartOfScan => {
                         // JPEG B.2.3
-
                         let num_components = vec[i + 4];
                         let mut scan_components = Vec::new();
                         for component in 0..num_components {
@@ -336,6 +332,7 @@ impl JFIFImage {
                             successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
                             successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
                         };
+
                         if jfif_image.scan_headers.is_none() {
                             jfif_image.scan_headers = Some(Vec::new());
                         }
@@ -343,36 +340,14 @@ impl JFIFImage {
                             .as_mut()
                             .map(|v| v.push(scan_header.clone()));
                         i += 8;
-                        // `i` is now at the head of the data.
-
-
-
-                        // Try to find a marker:
-                        let eos_index = {
-                            let mut index = i;
-                            while index < vec.len() - 1 {
-                                let ff = vec[index];
-                                let marker = vec[index + 1];
-                                if ff == 0xff && marker == 0xd9 {
-                                    break;
-                                }
-                                if ff == 0xff && marker != 0x00 {
-                                    println!("Found marker at index {} : 0xff{:02x}",
-                                             index,
-                                             marker);
-                                }
-                                index += 1;
-                            }
-                            index
-                        };
-
+                        // `i` is now at the head of the image data.
 
                         // Copy data, and replace 0xff00 with 0xff.
                         let mut bytes_skipped = 0;
                         let mut encoded_data = Vec::new();
                         {
                             let mut i = i;
-                            while i < eos_index {
+                            while i < vec.len() {
                                 encoded_data.push(vec[i]);
                                 if vec[i] == 0xff && vec[i + 1] == 0x00 {
                                     // Skip the 0x00 part here.
@@ -398,6 +373,7 @@ impl JFIFImage {
                                 jpeg_decoder.huffman_ac_tables(i as u8, table.clone());
                             }
                         }
+
 
                         for (i, table) in jfif_image.huffman_dc_tables.iter().enumerate() {
                             if let &Some(ref table) = table {

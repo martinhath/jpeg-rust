@@ -1,5 +1,4 @@
 use std::iter::repeat;
-use std::iter;
 use std::cmp::min;
 
 // Selects i bits, from msb to lsb.
@@ -39,7 +38,6 @@ impl Table {
         // id -> code length
         let code_lengths: Vec<u8> = (0..16)
             .flat_map(|i| repeat(i as u8 + 1).take(size_data[i] as usize))
-            .chain(iter::once(0))
             .collect();
         // id -> 0b10101
         let code_table: Vec<u16> = Table::make_code_table(&code_lengths);
@@ -83,7 +81,7 @@ impl Table {
         // This is more or less just an implementation of a
         // flowchart (Figure C.2) in the standard.
         let mut vec = Vec::new();
-        let mut code = 0;
+        let mut code: u16 = 0;
         let mut current_size = sizes[0];
         for &size in sizes {
             while size > current_size {
@@ -91,6 +89,9 @@ impl Table {
                 current_size += 1;
             }
             vec.push(code);
+            if current_size > 16 || code == 0xffff {
+                break;
+            }
             code += 1;
         }
         vec
