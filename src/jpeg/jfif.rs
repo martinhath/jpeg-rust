@@ -214,18 +214,19 @@ impl JFIFImage {
                 // NOTE: this does not count the length bytes anymore!
                 // TODO: Maybe do count them? In order to make it less confusing
                 let data_length = (u8s_to_u16(&vec[i + 2..]) - 2) as usize;
+                i += 4;
 
                 match marker {
                     Marker::Comment => {
-                        let comment = str::from_utf8(&vec[i + 4..i + 4 + data_length])
+                        let comment = str::from_utf8(&vec[i..i + data_length])
                             .map(|s| s.to_string())
                             .ok();
                         jfif_image.comment = comment;
                     }
                     Marker::QuantizationTable => {
                         // JPEG B.2.4.1
-                        let mut index = i + 4;
-                        while index < i + 4 + data_length {
+                        let mut index = i;
+                        while index < i + data_length {
                             let precision = (vec[index] & 0xf0) >> 4;
                             assert!(precision == 0);
                             let identifier = vec[index] & 0x0f;
@@ -241,13 +242,13 @@ impl JFIFImage {
                     }
                     Marker::BaselineDCT => {
                         // JPEG B.2.2
-                        let sample_precision = vec[i + 4];
-                        let num_lines = u8s_to_u16(&vec[i + 5..]);
-                        let samples_per_line = u8s_to_u16(&vec[i + 7..]);
-                        let image_components = vec[i + 9];
+                        let sample_precision = vec[i];
+                        let num_lines = u8s_to_u16(&vec[i + 1..]);
+                        let samples_per_line = u8s_to_u16(&vec[i + 3..]);
+                        let image_components = vec[i + 5];
 
                         let mut frame_components = Vec::with_capacity(image_components as usize);
-                        let mut index = i + 10;
+                        let mut index = i + 6;
                         for component in 0..image_components {
                             let component_id = vec[index];
                             let horizontal_sampling_factor = (vec[index + 1] & 0xf0) >> 4;
@@ -275,12 +276,12 @@ impl JFIFImage {
                     Marker::DefineHuffmanTable => {
                         // JPEG B.2.4.2
 
-                        let mut huffman_index = i + 4;
-                        let target_index = i + 4 + data_length;
-                        // Read tables untill the segment is done
+                        // Head of data for each table
+                        let mut huffman_index = i;
+                        // End of segment
+                        let segment_end = i + data_length;
 
-                        while huffman_index < target_index {
-                            // DC = 0, AC = 1
+                        while huffman_index < segment_end {
                             let table_class = (vec[huffman_index] & 0xf0) >> 4;
                             let table_dest_id = vec[huffman_index] & 0x0f;
                             huffman_index += 1;
@@ -289,6 +290,7 @@ impl JFIFImage {
                             let size_area: &[u8] = &vec[huffman_index..huffman_index + 16];
                             huffman_index += 16;
 
+                            // TODO: replace with `.sum` as of Rust 1.11
                             let number_of_codes = size_area.iter()
                                 .fold(0, |a, b| a + (*b as usize));
 
@@ -299,6 +301,7 @@ impl JFIFImage {
 
                             let huffman_table = huffman::Table::from_size_data_tables(size_area,
                                                                                       data_area);
+                            // DC = 0, AC = 1
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =
                                     Some(huffman_table);
@@ -310,13 +313,13 @@ impl JFIFImage {
                     }
                     Marker::StartOfScan => {
                         // JPEG B.2.3
-                        let num_components = vec[i + 4];
+                        let num_components = vec[i];
                         let mut scan_components = Vec::new();
                         for component in 0..num_components {
                             scan_components.push(ScanComponentHeader {
-                                component_id: vec[i + 5],
-                                dc_table_selector: (vec[i + 6] & 0xf0) >> 4,
-                                ac_table_selector: vec[i + 6] & 0x0f,
+                                component_id: vec[i + 1],
+                                dc_table_selector: (vec[i + 2] & 0xf0) >> 4,
+                                ac_table_selector: vec[i + 2] & 0x0f,
                             });
                             i += 2;
                         }
@@ -327,11 +330,13 @@ impl JFIFImage {
                         let scan_header = ScanHeader {
                             num_components: num_components,
                             scan_components: scan_components,
-                            start_spectral_selection: vec[i + 5],
-                            end_spectral_selection: vec[i + 6],
-                            successive_approximation_bit_pos_high: (vec[i + 7] & 0xf0) >> 4,
-                            successive_approximation_bit_pos_low: vec[i + 7] & 0x0f,
+                            start_spectral_selection: vec[i + 1],
+                            end_spectral_selection: vec[i + 2],
+                            successive_approximation_bit_pos_high: (vec[i + 3] & 0xf0) >> 4,
+                            successive_approximation_bit_pos_low: vec[i + 3] & 0x0f,
                         };
+                        // Register read data
+                        i += 4;
 
                         if jfif_image.scan_headers.is_none() {
                             jfif_image.scan_headers = Some(Vec::new());
@@ -339,8 +344,6 @@ impl JFIFImage {
                         jfif_image.scan_headers
                             .as_mut()
                             .map(|v| v.push(scan_header.clone()));
-                        i += 8;
-                        // `i` is now at the head of the image data.
 
                         // Copy data, and replace 0xff00 with 0xff.
                         let mut bytes_skipped = 0;
@@ -374,7 +377,6 @@ impl JFIFImage {
                             }
                         }
 
-
                         for (i, table) in jfif_image.huffman_dc_tables.iter().enumerate() {
                             if let &Some(ref table) = table {
                                 jpeg_decoder.huffman_dc_tables(i as u8, table.clone());
@@ -390,6 +392,8 @@ impl JFIFImage {
                         let (image_data, bytes_read) = jpeg_decoder.decode();
                         jfif_image.image_data = Some(image_data);
 
+                        // Since we are calculating how much data there is in this segment,
+                        // we update `i` manually, and `continue` the `while` loop.
                         i += bytes_read + bytes_skipped;
                         continue;
                     }
@@ -405,14 +409,14 @@ impl JFIFImage {
                         //  X’FF’, APP0, length, identifier, version, units,
                         //  Xdensity, Ydensity, Xthumbnail, Ythumbnail, (RGB)n
 
-                        let identifier = &vec[i + 4..i + 10];
-                        let version = JFIFVersion::from_bytes(vec[11], vec[12]);
+                        let identifier = &vec[i..i + 6];
+                        let version = JFIFVersion::from_bytes(vec[7], vec[8]);
                         let units = JFIFUnits::from_u8(vec[13]);
 
-                        let x_density = u8s_to_u16(&vec[14..16]);
-                        let y_density = u8s_to_u16(&vec[16..18]);
+                        let x_density = u8s_to_u16(&vec[10..12]);
+                        let y_density = u8s_to_u16(&vec[12..14]);
 
-                        let thumbnail_dimensions = (vec[18], vec[19]);
+                        let thumbnail_dimensions = (vec[14], vec[15]);
                     }
                     Marker::ApplicationSegment12 => {
                         panic!("got {:?}", marker);
@@ -424,11 +428,13 @@ impl JFIFImage {
                     Marker::StartOfImage => {}
                     Marker::EndOfImage => {}
                 }
-                i += 4 + data_length;
+                i += data_length;
             } else {
-                panic!("\n\nUnhandled byte marker: {:02x} {:02x}",
+                panic!("Unhandled byte marker: {:02x} {:02x} (i={}/{})",
                        vec[i],
-                       vec[i + 1]);
+                       vec[i + 1],
+                       i,
+                       vec.len());
             }
         }
         Ok(jfif_image)
