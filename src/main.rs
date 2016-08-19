@@ -9,7 +9,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-use jpeg::jfif::*;
+use jpeg::jpeg::*;
 
 fn file_to_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     File::open(path).map(|file| {
@@ -26,7 +26,7 @@ fn main() {
     let output_file = args.next().expect("Must supply an output file");
 
     let bytes = file_to_bytes(Path::new(&input_file)).unwrap();
-    let image = JFIFImage::parse(bytes).unwrap();
+    let image = JPEGImage::parse(bytes).unwrap();
     // Show the image, somehow.
 
     let mut file = File::create(output_file).unwrap();

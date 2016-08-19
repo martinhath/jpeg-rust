@@ -54,7 +54,7 @@ type ThumbnailDimensions = (u8, u8);
 /// This should contain everything one would want to know
 /// about the image.
 #[derive(Debug)]
-pub struct JFIFImage {
+pub struct JPEGImage {
     /// JFIF version the image is compliant to
     version: JFIFVersion,
     /// TODO:
@@ -179,9 +179,9 @@ fn bytes_to_marker(data: &[u8]) -> Option<Marker> {
 }
 
 #[allow(unused_variables)]
-impl JFIFImage {
-    fn new() -> JFIFImage {
-        JFIFImage {
+impl JPEGImage {
+    fn new() -> JPEGImage {
+        JPEGImage {
             version: JFIFVersion::Unknown(0, 0),
             units: JFIFUnits::Unknown(0),
             pixel_density: (0, 0),
@@ -197,8 +197,8 @@ impl JFIFImage {
         }
     }
 
-    pub fn parse(vec: Vec<u8>) -> Result<JFIFImage, String> {
-        let mut jfif_image = JFIFImage::new();
+    pub fn parse(vec: Vec<u8>) -> Result<JPEGImage, String> {
+        let mut image = JPEGImage::new();
 
         let mut i = 0;
         while i < vec.len() {
@@ -221,7 +221,7 @@ impl JFIFImage {
                         let comment = str::from_utf8(&vec[i..i + data_length])
                             .map(|s| s.to_string())
                             .ok();
-                        jfif_image.comment = comment;
+                        image.comment = comment;
                     }
                     Marker::QuantizationTable => {
                         // JPEG B.2.4.1
@@ -235,7 +235,7 @@ impl JFIFImage {
                                 .cloned()
                                 .collect();
 
-                            jfif_image.quantization_tables[identifier as usize] = Some(table);
+                            image.quantization_tables[identifier as usize] = Some(table);
                             index += 65; // 64 entries + one header byte
                         }
                     }
@@ -269,8 +269,8 @@ impl JFIFImage {
                             image_components: image_components,
                             frame_components: frame_components,
                         };
-                        jfif_image.dimensions = (samples_per_line, num_lines);
-                        jfif_image.frame_header = Some(frame_header)
+                        image.dimensions = (samples_per_line, num_lines);
+                        image.frame_header = Some(frame_header)
                     }
                     Marker::DefineHuffmanTable => {
                         // JPEG B.2.4.2
@@ -302,10 +302,10 @@ impl JFIFImage {
                                 huffman::HuffmanTable::from_size_data_tables(size_area, data_area);
                             // DC = 0, AC = 1
                             if table_class == 0 {
-                                jfif_image.huffman_dc_tables[table_dest_id as usize] =
+                                image.huffman_dc_tables[table_dest_id as usize] =
                                     Some(huffman_table);
                             } else {
-                                jfif_image.huffman_ac_tables[table_dest_id as usize] =
+                                image.huffman_ac_tables[table_dest_id as usize] =
                                     Some(huffman_table);
                             }
                         }
@@ -337,10 +337,10 @@ impl JFIFImage {
                         // Register read data
                         i += 4;
 
-                        if jfif_image.scan_headers.is_none() {
-                            jfif_image.scan_headers = Some(Vec::new());
+                        if image.scan_headers.is_none() {
+                            image.scan_headers = Some(Vec::new());
                         }
-                        jfif_image.scan_headers
+                        image.scan_headers
                             .as_mut()
                             .map(|v| v.push(scan_header.clone()));
 
@@ -361,35 +361,35 @@ impl JFIFImage {
                         }
 
 
-                        let frame_header = jfif_image.frame_header.clone().unwrap();
+                        let frame_header = image.frame_header.clone().unwrap();
                         let mut jpeg_decoder = JPEGDecoder::new(encoded_data.as_slice())
                             .frame_header(frame_header)
                             // need `.clone()`, or we hit some LLVM bug??
                             .scan_header(scan_header.clone())
-                            .dimensions((jfif_image.dimensions.0 as usize,
-                                         jfif_image.dimensions.1 as usize));
+                            .dimensions((image.dimensions.0 as usize,
+                                         image.dimensions.1 as usize));
 
                         // Add tables to `jpeg_decoder`
-                        for (i, table) in jfif_image.huffman_ac_tables.iter().enumerate() {
+                        for (i, table) in image.huffman_ac_tables.iter().enumerate() {
                             if let &Some(ref table) = table {
                                 jpeg_decoder.huffman_ac_tables(i as u8, table.clone());
                             }
                         }
 
-                        for (i, table) in jfif_image.huffman_dc_tables.iter().enumerate() {
+                        for (i, table) in image.huffman_dc_tables.iter().enumerate() {
                             if let &Some(ref table) = table {
                                 jpeg_decoder.huffman_dc_tables(i as u8, table.clone());
                             }
                         }
 
-                        for (i, table) in jfif_image.quantization_tables.iter().enumerate() {
+                        for (i, table) in image.quantization_tables.iter().enumerate() {
                             if let &Some(ref table) = table {
                                 jpeg_decoder.quantization_table(i as u8, table.clone());
                             }
                         }
 
                         let (image_data, bytes_read) = jpeg_decoder.decode();
-                        jfif_image.image_data = Some(image_data);
+                        image.image_data = Some(image_data);
 
                         // Since we are calculating how much data there is in this segment,
                         // we update `i` manually, and `continue` the `while` loop.
@@ -436,7 +436,7 @@ impl JFIFImage {
                        vec.len());
             }
         }
-        Ok(jfif_image)
+        Ok(image)
     }
 
     pub fn width(&self) -> usize {

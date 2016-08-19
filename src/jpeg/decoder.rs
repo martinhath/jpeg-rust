@@ -1,6 +1,6 @@
 use std::iter::repeat;
 
-use jpeg::jfif::{FrameHeader, ScanHeader};
+use jpeg::jpeg::{FrameHeader, ScanHeader};
 use jpeg::huffman;
 use ::transform;
 
