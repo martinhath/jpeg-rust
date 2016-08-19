@@ -12,10 +12,10 @@ use std::path::Path;
 use jpeg::jpeg::*;
 
 fn file_to_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
-    File::open(path).map(|file| {
-        file.bytes()
-            .flat_map(|b| b.ok())
-            .collect()
+    File::open(path).and_then(|mut file| {
+        let mut bytes = Vec::new();
+        try!(file.read_to_end(&mut bytes));
+        Ok(bytes)
     })
 }
 
