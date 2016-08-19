@@ -70,9 +70,9 @@ pub struct JFIFImage {
     /// Optional comment
     comment: Option<String>,
     /// huffman tables for AC coefficients
-    huffman_ac_tables: [Option<huffman::Table>; 4],
+    huffman_ac_tables: [Option<huffman::HuffmanTable>; 4],
     /// huffman tables for DC coefficients
-    huffman_dc_tables: [Option<huffman::Table>; 4],
+    huffman_dc_tables: [Option<huffman::HuffmanTable>; 4],
     /// Quantization tables
     quantization_tables: [Option<Vec<u8>>; 4],
     /// Frame header data
@@ -230,9 +230,8 @@ impl JFIFImage {
                             let precision = (vec[index] & 0xf0) >> 4;
                             assert!(precision == 0);
                             let identifier = vec[index] & 0x0f;
-                            let table: Vec<u8> = vec[index + 1..]
+                            let table: Vec<u8> = vec[index + 1..index + 65]
                                 .iter()
-                                .take(64)
                                 .cloned()
                                 .collect();
 
@@ -299,8 +298,8 @@ impl JFIFImage {
                                                                        number_of_codes];
                             huffman_index += number_of_codes;
 
-                            let huffman_table = huffman::Table::from_size_data_tables(size_area,
-                                                                                      data_area);
+                            let huffman_table =
+                                huffman::HuffmanTable::from_size_data_tables(size_area, data_area);
                             // DC = 0, AC = 1
                             if table_class == 0 {
                                 jfif_image.huffman_dc_tables[table_dest_id as usize] =

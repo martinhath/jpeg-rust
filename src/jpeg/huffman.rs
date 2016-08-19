@@ -10,7 +10,7 @@ const BIT_MASKS: [u16; 17] = [0x0, 0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC0
 // PLEASE FIX!!
 
 #[derive(Debug, Clone)]
-pub struct Code {
+pub struct HuffmanCode {
     /// How many bits are used in the code
     length: u8,
     /// The bit code. If the number of bits used to represent the code is less
@@ -21,12 +21,12 @@ pub struct Code {
 }
 
 #[derive(Debug)]
-pub struct Table {
+pub struct HuffmanTable {
     /// A list of all codes in the table, sorted on code length
-    codes: Vec<Code>,
+    codes: Vec<HuffmanCode>,
 }
 
-impl Table {
+impl HuffmanTable {
     /// Create a Huffman table from a size table and a corresponding data table.
     ///
     /// The size data describes how many codes there are of a given size. For
@@ -34,19 +34,19 @@ impl Table {
     ///
     /// The data table describes the value of these codes. Code number `i` has
     /// the value `data_table[i]`.
-    pub fn from_size_data_tables(size_data: &[u8], data_table: &[u8]) -> Table {
+    pub fn from_size_data_tables(size_data: &[u8], data_table: &[u8]) -> HuffmanTable {
         // id -> code length
         let code_lengths: Vec<u8> = (0..16)
             .flat_map(|i| repeat(i as u8 + 1).take(size_data[i] as usize))
             .collect();
         // id -> 0b10101
-        let code_table: Vec<u16> = Table::make_code_table(&code_lengths);
+        let code_table: Vec<u16> = HuffmanTable::make_code_table(&code_lengths);
 
-        let codes: Vec<Code> = data_table.iter()
+        let codes: Vec<HuffmanCode> = data_table.iter()
             .zip(code_lengths.iter())
             .zip(code_table.iter())
             .map(|((&value, &length), &code)| {
-                Code {
+                HuffmanCode {
                     length: length,
                     code: code,
                     value: value,
@@ -54,10 +54,10 @@ impl Table {
             })
             .collect();
 
-        Table { codes: codes }
+        HuffmanTable { codes: codes }
     }
 
-    pub fn codes_of_length(&self, len: usize) -> &[Code] {
+    pub fn codes_of_length(&self, len: usize) -> &[HuffmanCode] {
         assert!(len >= 2);
         assert!(len < 17);
         let len_u8 = len as u8;
@@ -98,9 +98,9 @@ impl Table {
     }
 }
 
-impl Clone for Table {
-    fn clone(&self) -> Table {
-        Table { codes: self.codes.iter().cloned().collect() }
+impl Clone for HuffmanTable {
+    fn clone(&self) -> HuffmanTable {
+        HuffmanTable { codes: self.codes.iter().cloned().collect() }
     }
 }
 
@@ -143,7 +143,7 @@ impl<'a> HuffmanDecoder<'a> {
     }
 
     /// Read the next 8x8 block
-    pub fn next_block(&mut self, ac_table: &Table, dc_table: &Table) -> Vec<i16> {
+    pub fn next_block(&mut self, ac_table: &HuffmanTable, dc_table: &HuffmanTable) -> Vec<i16> {
         // First we read the DC coefficient, which is encoded as
         // `(num_bits)(value)`, where `value` is _not_ huffman encoded,
         // but `num_bits` is.
@@ -208,7 +208,7 @@ impl<'a> HuffmanDecoder<'a> {
     }
 
     /// Get the next code from `current` in the supplied table.
-    fn next_code(&mut self, table: &Table) -> Option<u8> {
+    fn next_code(&mut self, table: &HuffmanTable) -> Option<u8> {
         (2..17)
             .flat_map(|len| {
                 let mask = BIT_MASKS[len];

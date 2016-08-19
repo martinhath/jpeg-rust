@@ -17,9 +17,9 @@ pub struct JPEGDecoder<'a> {
     /// Encoded image data
     data: &'a [u8],
     /// Huffman tables for AC coefficients
-    huffman_ac_tables: [Option<huffman::Table>; 4],
+    huffman_ac_tables: [Option<huffman::HuffmanTable>; 4],
     /// Huffman tables for DC coefficients
-    huffman_dc_tables: [Option<huffman::Table>; 4],
+    huffman_dc_tables: [Option<huffman::HuffmanTable>; 4],
     /// Quantization tables
     quantization_tables: [Option<QuantizationTable>; 4],
     /// Fields specific for each component.
@@ -65,11 +65,11 @@ impl<'a> JPEGDecoder<'a> {
         self
     }
 
-    pub fn huffman_ac_tables(&mut self, id: u8, table: huffman::Table) {
+    pub fn huffman_ac_tables(&mut self, id: u8, table: huffman::HuffmanTable) {
         self.huffman_ac_tables[id as usize] = Some(table);
     }
 
-    pub fn huffman_dc_tables(&mut self, id: u8, table: huffman::Table) {
+    pub fn huffman_dc_tables(&mut self, id: u8, table: huffman::HuffmanTable) {
         self.huffman_dc_tables[id as usize] = Some(table);
     }
 
@@ -148,11 +148,11 @@ impl<'a> JPEGDecoder<'a> {
         self
     }
 
-    fn ac_table(&'a self, id: u8) -> &'a huffman::Table {
+    fn ac_table(&'a self, id: u8) -> &'a huffman::HuffmanTable {
         self.huffman_ac_tables[id as usize].as_ref().unwrap()
     }
 
-    fn dc_table(&'a self, id: u8) -> &'a huffman::Table {
+    fn dc_table(&'a self, id: u8) -> &'a huffman::HuffmanTable {
         self.huffman_dc_tables[id as usize].as_ref().unwrap()
     }
 
