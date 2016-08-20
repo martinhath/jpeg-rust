@@ -12,6 +12,7 @@ Feel free to submit issues, be it bugs or feature requests.
  - [Part 1 - Background](https://mht.technology/post/jpeg-rust-1)
  - [Part 2 - Implementation I](https://mht.technology/post/jpeg-rust-2)
  - Part 3 - Implementation II (upcomming)
+ - Part 4 - Performance (planned)
 
 
 
