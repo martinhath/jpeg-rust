@@ -176,6 +176,12 @@ impl<'a> JPEGDecoder<'a> {
             .max()
             .unwrap_or(1) as usize;
 
+        let max_block_vert_scale = self.component_fields
+            .iter()
+            .map(|c| c.vertical_sampling_factor)
+            .max()
+            .unwrap_or(1) as usize;
+
         let mut huffman_decoder = huffman::HuffmanDecoder::new(&self.data);
 
         // Step 1: Read encoded data
@@ -219,12 +225,25 @@ impl<'a> JPEGDecoder<'a> {
                 .map(|block| transform::discrete_cosine_transform_inverse(&block))
                 .collect();
 
-            // Now we may need to expand blocks for some compoents,
-            // in case some sampling factors are > 1.
-            assert!(component.horizontal_sampling_factor < 3);
-            // TODO: Fix vertical scaling
-            assert!(component.vertical_sampling_factor == 1);
-            if max_block_hori_scale != 1 && component.horizontal_sampling_factor == 1 {
+            // See JPEG A.1.1
+            let x_i = (self.dimensions.0 as f32 *
+                       (component.horizontal_sampling_factor as f32 / max_block_hori_scale as f32))
+                .ceil();
+
+            let y_i = (self.dimensions.1 as f32 *
+                       (component.vertical_sampling_factor as f32 / max_block_vert_scale as f32))
+                .ceil();
+
+            // Now `x_i` and `y_i` are the dimensions of the read blocks.
+            // if they are below `self.dimensions.0`, they need expansion.
+            // NOTE: might be some tricky floating conversion pitfalls here?
+
+            let x_factor = (self.dimensions.0 as f32 / x_i) as u32;
+            let y_factor = (self.dimensions.1 as f32 / y_i) as u32;
+
+            if x_factor == 1 {
+                blocks[component_i] = component_blocks;
+            } else if x_factor == 2 {
                 blocks[component_i] = component_blocks.iter()
                     .flat_map(|block| {
                         let (a, b) = expand_block_x_2(block);
@@ -232,8 +251,11 @@ impl<'a> JPEGDecoder<'a> {
                     })
                     .collect();
             } else {
-                blocks[component_i] = component_blocks;
+                panic!("Fix expansion above factor=2");
             }
+
+            // TODO: fix vertical expansion.
+            assert!(y_factor == 1);
         }
 
         // Step 3: Merge color data
