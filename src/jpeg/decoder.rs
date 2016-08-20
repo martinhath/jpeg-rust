@@ -4,7 +4,7 @@ use jpeg::jpeg::{FrameHeader, ScanHeader};
 use jpeg::huffman;
 use ::transform;
 
-type QuantizationTable = Vec<u8>;
+type QuantizationTable = Vec<u16>;
 type Block = Vec<f32>;
 
 /// Struct to hold state of JPEG decoding.
@@ -73,7 +73,7 @@ impl<'a> JPEGDecoder<'a> {
         self.huffman_dc_tables[id as usize] = Some(table);
     }
 
-    pub fn quantization_table(&mut self, id: u8, table: Vec<u8>) {
+    pub fn quantization_table(&mut self, id: u8, table: Vec<u16>) {
         self.quantization_tables[id as usize] = Some(table);
     }
 

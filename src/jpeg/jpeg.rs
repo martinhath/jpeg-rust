@@ -74,7 +74,7 @@ pub struct JPEGImage {
     /// huffman tables for DC coefficients
     huffman_dc_tables: [Option<huffman::HuffmanTable>; 4],
     /// Quantization tables
-    quantization_tables: [Option<Vec<u8>>; 4],
+    quantization_tables: [Option<Vec<u16>>; 4],
     /// Frame header data
     frame_header: Option<FrameHeader>,
     scan_headers: Option<Vec<ScanHeader>>,
@@ -228,15 +228,33 @@ impl JPEGImage {
                         let mut index = i;
                         while index < i + data_length {
                             let precision = (vec[index] & 0xf0) >> 4;
-                            assert!(precision == 0);
                             let identifier = vec[index] & 0x0f;
-                            let table: Vec<u8> = vec[index + 1..index + 65]
-                                .iter()
-                                .cloned()
-                                .collect();
+                            // Although precision == 0 is "guaranteed" by the standard,
+                            // images with 16-bit precision to exist.
+                            if precision == 0 {
+                                // 8-bit
+                                let table: Vec<u16> = vec[index + 1..index + 65]
+                                    .iter()
+                                    .map(|b| *b as u16)
+                                    .collect();
 
-                            image.quantization_tables[identifier as usize] = Some(table);
-                            index += 65; // 64 entries + one header byte
+                                image.quantization_tables[identifier as usize] = Some(table);
+                                index += 65; // 64 entries + one header byte
+                            } else if precision == 1 {
+                                let bytes = &vec[index + 1..index + 129];
+                                let mut i = 0;
+                                let mut table = Vec::with_capacity(64);
+                                while i < 128 {
+                                    let msb = bytes[i] as u16;
+                                    let lsb = bytes[i + 1] as u16;
+                                    table.push(msb << 8 | lsb);
+                                    i += 2;
+                                }
+                                image.quantization_tables[identifier as usize] = Some(table);
+                                index += 129;
+                            } else {
+                                panic!("Unknown precision of quantization table: {}", precision);
+                            }
                         }
                     }
                     Marker::BaselineDCT => {
