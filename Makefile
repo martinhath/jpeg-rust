@@ -1,8 +1,8 @@
 rust-build:
-	cargo build
+	cargo build --release
 
 %-gen-diff.jpeg: %.jpeg rust-build
-	RUST_BACKTRACE=1 cargo run $*.jpeg $*-gen.ppm
+	RUST_BACKTRACE=1 cargo run --release $*.jpeg $*-gen.ppm
 	-composite $*-gen.ppm $*.jpeg -compose difference $*-gen-diff.jpeg
 	eog $*-gen-diff.jpeg
 

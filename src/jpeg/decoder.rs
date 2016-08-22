@@ -182,26 +182,35 @@ impl<'a> JPEGDecoder<'a> {
             .max()
             .unwrap_or(1) as usize;
 
+        let block_factor = max_block_hori_scale * max_block_vert_scale;
+
         let mut huffman_decoder = huffman::HuffmanDecoder::new(&self.data);
 
         // Step 1: Read encoded data
-        for _ in 0..num_blocks / max_block_hori_scale {
-            for (component_i, component) in self.component_fields.iter().enumerate() {
-                let ac_table = self.ac_table(component.ac_table_id);
-                let dc_table = self.dc_table(component.dc_table_id);
+        for line in 0..num_blocks_y / max_block_vert_scale {
+            for _ in 0..num_blocks_x / max_block_hori_scale {
+                for (component_i, component) in self.component_fields.iter().enumerate() {
+                    let vsf = component.vertical_sampling_factor as usize;
+                    if line % vsf != (vsf - 1) {
+                        continue;
+                    }
+                    let ac_table = self.ac_table(component.ac_table_id);
+                    let dc_table = self.dc_table(component.dc_table_id);
 
-                for _ in 0..component.horizontal_sampling_factor {
-                    let mut decoded_block: Vec<f32> = huffman_decoder.next_block(ac_table, dc_table)
-                        .iter()
-                        .map(|&i| i as f32)
-                        .collect();
+                    for _ in 0..component.horizontal_sampling_factor {
+                        let mut decoded_block: Vec<f32> =
+                            huffman_decoder.next_block(ac_table, dc_table)
+                                .iter()
+                                .map(|&i| i as f32)
+                                .collect();
 
-                    // DC correction
-                    let encoded = decoded_block[0];
-                    decoded_block[0] = encoded + previous_dc[component_i];
-                    previous_dc[component_i] = decoded_block[0];
+                        // DC correction
+                        let encoded = decoded_block[0];
+                        decoded_block[0] = encoded + previous_dc[component_i];
+                        previous_dc[component_i] = decoded_block[0];
 
-                    blocks[component_i].push(decoded_block);
+                        blocks[component_i].push(decoded_block);
+                    }
                 }
             }
         }
