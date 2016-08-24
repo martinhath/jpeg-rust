@@ -9,7 +9,7 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 
-use jpeg::jpeg::*;
+use jpeg::*;
 
 fn file_to_bytes(path: &Path) -> Result<Vec<u8>, std::io::Error> {
     File::open(path).and_then(|mut file| {

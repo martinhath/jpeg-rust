@@ -15,7 +15,7 @@ fn usize_square(n: usize) -> Option<usize> {
 #[allow(non_upper_case_globals)]
 const Pi: f32 = PI as f32;
 
-pub fn discrete_cosine_transform(input: &Vec<f32>) -> Vec<f32> {
+pub fn discrete_cosine_transform(input: &[f32]) -> Vec<f32> {
     let alpha = |u| {
         if u == 0 {
             1f32 / 2f32.sqrt()
@@ -52,7 +52,7 @@ pub fn discrete_cosine_transform(input: &Vec<f32>) -> Vec<f32> {
     vec
 }
 
-pub fn discrete_cosine_transform_inverse(input: &Vec<f32>) -> Vec<f32> {
+pub fn discrete_cosine_transform_inverse(input: &[f32]) -> Vec<f32> {
     let alpha = |u| {
         if u == 0 {
             1f32 / 2f32.sqrt()
