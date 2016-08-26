@@ -67,7 +67,7 @@ impl HuffmanTable {
             .skip_while(|&(_, code)| code.length != len_u8)
             .take_while(|&(_, code)| code.length == len_u8);
         let (a, b) = if let Some(a) = codes_of_length.next().map(|(i, _)| i) {
-            let b = codes_of_length.last().map(|(i, _)| i).unwrap_or(a) + 1;
+            let b = codes_of_length.last().map_or(a, |(i, _)| i) + 1;
             (a, b)
         } else {
             (0, 0)
@@ -125,7 +125,7 @@ impl<'a> HuffmanDecoder<'a> {
         // TODO: Revisit this: is it weird to read from `data` in
         // the constructor?
         let current = ((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                      ((data[2] as u32) << 8) | ((data[3] as u32) << 0);
+                      ((data[2] as u32) << 8 ) |  (data[3] as u32);
         HuffmanDecoder {
             data: data,
             next_index: 4,

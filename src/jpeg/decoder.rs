@@ -1,11 +1,12 @@
 use std::iter::repeat;
 
-use jpeg::jpeg::{FrameHeader, ScanHeader};
+use jpeg::{FrameHeader, ScanHeader};
 use jpeg::huffman;
 use ::transform;
 
 type QuantizationTable = Vec<u16>;
 type Block = Vec<f32>;
+type BlockSlice = [f32];
 
 /// Struct to hold state of JPEG decoding.
 /// Instantiate it, and pass in AC/DC tables, quantization
@@ -184,7 +185,7 @@ impl<'a> JPEGDecoder<'a> {
 
         let block_factor = max_block_hori_scale * max_block_vert_scale;
 
-        let mut huffman_decoder = huffman::HuffmanDecoder::new(&self.data);
+        let mut huffman_decoder = huffman::HuffmanDecoder::new(self.data);
 
         // Step 1: Read encoded data
         for line in 0..num_blocks_y / max_block_vert_scale {
@@ -306,7 +307,7 @@ impl<'a> JPEGDecoder<'a> {
             for line in 0..8 {
                 for block_x in 0..num_blocks_x {
                     let block_index = num_blocks_x * block_y + block_x;
-                    let ref block = rgb_blocks[block_index];
+                    let block = &rgb_blocks[block_index];
                     for row in 0..8 {
                         let in_block_index = 8 * line + row;
                         image_data.push(block[in_block_index]);
@@ -350,7 +351,7 @@ fn y_cb_cr_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
     (r, g, b)
 }
 
-fn expand_block_x_2(block: &Block) -> (Block, Block) {
+fn expand_block_x_2(block: &BlockSlice) -> (Block, Block) {
     // Expand a block along the x axis:
     //
     //  |1 2|      |1 1| |2 2|
@@ -382,7 +383,7 @@ const ZIGZAG_INDICES: [usize; 64] =
      20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58,
      59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63];
 #[allow(dead_code)]
-fn zigzag<T>(vec: &Vec<T>) -> Vec<T>
+fn zigzag<T>(vec: &[T]) -> Vec<T>
     where T: Copy
 {
     if vec.len() != 64 {
