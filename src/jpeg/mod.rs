@@ -272,6 +272,9 @@ impl JPEGImage {
                             let component_id = vec[index];
                             let horizontal_sampling_factor = (vec[index + 1] & 0xf0) >> 4;
                             let vertical_sampling_factor = vec[index + 1] & 0x0f;
+                            assert!(horizontal_sampling_factor > 0 &&
+                                    horizontal_sampling_factor < 3);
+                            assert!(vertical_sampling_factor > 0 && vertical_sampling_factor < 3);
                             let quantization_selector = vec[index + 2];
 
                             frame_components.push(FrameComponentHeader {
@@ -290,7 +293,8 @@ impl JPEGImage {
                             frame_components: frame_components,
                         };
                         image.dimensions = (samples_per_line, num_lines);
-                        image.frame_header = Some(frame_header)
+                        image.frame_header = Some(frame_header);
+
                     }
                     Marker::DefineHuffmanTable => {
                         // JPEG B.2.4.2
@@ -410,6 +414,7 @@ impl JPEGImage {
 
                         let (image_data, bytes_read) = jpeg_decoder.decode();
                         image.image_data = Some(image_data);
+                        return Ok(image);
 
                         // Since we are calculating how much data there is in this segment,
                         // we update `i` manually, and `continue` the `while` loop.

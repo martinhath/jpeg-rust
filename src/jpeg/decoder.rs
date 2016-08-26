@@ -1,4 +1,7 @@
+extern crate itertools;
+
 use std::iter::repeat;
+use self::itertools::Itertools;
 
 use jpeg::{FrameHeader, ScanHeader};
 use jpeg::huffman;
@@ -161,6 +164,8 @@ impl<'a> JPEGDecoder<'a> {
         // Number of blocks in x and y direction
         let num_blocks_x = (self.dimensions.0 + 7) / 8;
         let num_blocks_y = (self.dimensions.1 + 7) / 8;
+        println!("num_blocks_x: {}", num_blocks_x);
+        println!("num_blocks_y: {}", num_blocks_y);
         let num_blocks = num_blocks_x * num_blocks_y;
 
         let num_components = self.component_fields.len();
@@ -187,39 +192,72 @@ impl<'a> JPEGDecoder<'a> {
 
         let mut huffman_decoder = huffman::HuffmanDecoder::new(self.data);
 
+        let skip_factor = max_block_vert_scale * max_block_hori_scale;
+        let num_read_blocks = (num_blocks + skip_factor - 1) / skip_factor;
+        println!("num_blocks: {}", num_blocks);
+        println!("num_read_blocks: {}", num_read_blocks);
+
         // Step 1: Read encoded data
-        for line in 0..num_blocks_y / max_block_vert_scale {
-            for _ in 0..num_blocks_x / max_block_hori_scale {
-                for (component_i, component) in self.component_fields.iter().enumerate() {
-                    let vsf = component.vertical_sampling_factor as usize;
-                    if line % vsf != (vsf - 1) {
-                        continue;
-                    }
-                    let ac_table = self.ac_table(component.ac_table_id);
-                    let dc_table = self.dc_table(component.dc_table_id);
+        for _ in 0..num_read_blocks {
+            for (component_i, component) in self.component_fields.iter().enumerate() {
+                let ac_table = self.ac_table(component.ac_table_id);
+                let dc_table = self.dc_table(component.dc_table_id);
 
-                    for _ in 0..component.horizontal_sampling_factor {
-                        let mut decoded_block: Vec<f32> =
-                            huffman_decoder.next_block(ac_table, dc_table)
-                                .iter()
-                                .map(|&i| i as f32)
-                                .collect();
+                for _ in 0..(component.horizontal_sampling_factor *
+                             component.vertical_sampling_factor) {
+                    let mut decoded_block: Vec<f32> = huffman_decoder.next_block(ac_table, dc_table)
+                        .iter()
+                        .map(|&i| i as f32)
+                        .collect();
 
-                        // DC correction
-                        let encoded = decoded_block[0];
-                        decoded_block[0] = encoded + previous_dc[component_i];
-                        previous_dc[component_i] = decoded_block[0];
+                    // DC correction
+                    let encoded = decoded_block[0];
+                    decoded_block[0] = encoded + previous_dc[component_i];
+                    previous_dc[component_i] = decoded_block[0];
 
-                        blocks[component_i].push(decoded_block);
-                    }
+                    blocks[component_i].push(decoded_block);
                 }
             }
+        }
+        println!("Read all blocks");
+        for i in 0..self.component_fields.len() {
+            println!("len {}: {}", i, blocks[i].len());
         }
 
         // Step 2: get color data
         // Now all decoded blocks are in `blocks`.
         // For each block, do dequantization, reverse zigzag, and inverse DCT.
         for (component_i, component) in self.component_fields.iter().enumerate() {
+
+            // if `component.vertical_sampling_factor` > 1, we need to reorder the
+            // blocks somewhat (see JPEG Figure A.3)
+            if max_block_vert_scale > 1 && component.vertical_sampling_factor > 1 {
+                let (xs, ys) = blocks.remove(component_i)
+                    .into_iter()
+                    .chunks_lazy((component.horizontal_sampling_factor *
+                                 component.vertical_sampling_factor) as usize)
+                    .into_iter()
+                    .fold((vec![], vec![]), |mut acc, mut chunks| {
+                        let mut iter = chunks.into_iter();
+                        for _ in 0..component.horizontal_sampling_factor {
+                            acc.0.push(iter.next().unwrap());
+                        }
+                        for _ in 0..component.vertical_sampling_factor {
+                            acc.1.push(iter.next().unwrap());
+                        }
+                        acc
+                    });
+
+                let fixed: Vec<_> = xs.into_iter()
+                    .zip(ys)
+                    .flat_map(|(a, b)| vec![a, b])
+                    .collect();
+
+                println!("comp {}: {}", component_i, fixed.len());
+                blocks.insert(component_i, fixed);
+            }
+
+
             let quant_table = self.quantization_tables[component.quantization_id as usize]
                 .as_ref()
                 .expect(&format!("Did not find quantization table for {}",
@@ -244,12 +282,19 @@ impl<'a> JPEGDecoder<'a> {
                        (component.vertical_sampling_factor as f32 / max_block_vert_scale as f32))
                 .ceil();
 
-            // Now `x_i` and `y_i` are the dimensions of the read blocks.
-            // if they are below `self.dimensions.0`, they need expansion.
-            // NOTE: might be some tricky floating conversion pitfalls here?
+            // `?_factor` are how many times each block needs to be repeated
+            // in its direction.
+            let x_factor = (self.dimensions.0 as f32 / x_i).ceil() as u32;
+            let y_factor = (self.dimensions.1 as f32 / y_i).ceil() as u32;
 
-            let x_factor = (self.dimensions.0 as f32 / x_i) as u32;
-            let y_factor = (self.dimensions.1 as f32 / y_i) as u32;
+            // See Figure A.3 in JPEG spec
+            match (x_factor, y_factor) {
+                (1, 1) => {}
+                (1, 2) => {}
+                (2, 1) => {}
+                (2, 2) => {}
+                _ => unreachable!(),
+            }
 
             if x_factor == 1 {
                 blocks[component_i] = component_blocks;
@@ -261,11 +306,36 @@ impl<'a> JPEGDecoder<'a> {
                     })
                     .collect();
             } else {
-                panic!("Fix expansion above factor=2");
+                panic!("Fix expansion above x factor=2");
             }
+            println!("after x: {}", blocks[component_i].len());
 
-            // TODO: fix vertical expansion.
-            assert!(y_factor == 1);
+
+            if y_factor == 2 {
+                let mut bls: Vec<Block> =
+                    repeat(repeat(128.0).take(64).collect()).take(num_blocks).collect();
+                let mut read_i = 0;
+                let mut i = 0;
+                while read_i < blocks[component_i].len() {
+                    if i + num_blocks_x >= num_blocks {
+                        // Why??
+                        break;
+                    }
+
+                    for n in 0..num_blocks_x {
+                        let (a, b) = expand_block_y_2(&blocks[component_i][read_i]);
+                        bls[i] = a;
+                        bls[i + num_blocks_x] = b;
+                        read_i += 1;
+                        i += 1;
+                    }
+                    i += num_blocks_x;
+                }
+                blocks[component_i] = bls;
+            } else if y_factor != 1 {
+                panic!("Fix expansion above y factor=2");
+            }
+            println!("after y: {}", blocks[component_i].len());
         }
 
         // Step 3: Merge color data
@@ -373,6 +443,20 @@ fn expand_block_x_2(block: &BlockSlice) -> (Block, Block) {
             block_b.push(n);
             block_b.push(n);
         }
+    }
+    (block_a, block_b)
+}
+
+fn expand_block_y_2(block: &Block) -> (Block, Block) {
+    let mut block_a = Vec::new();
+    let mut block_b = Vec::new();
+    for &n in block.iter().take(32) {
+        block_a.push(n);
+        block_a.push(n);
+    }
+    for &n in block.iter().skip(32) {
+        block_b.push(n);
+        block_b.push(n);
     }
     (block_a, block_b)
 }
