@@ -1,7 +1,6 @@
-extern crate itertools;
-
 use std::iter::repeat;
-use self::itertools::Itertools;
+
+use itertools::Itertools;
 
 use jpeg::{FrameHeader, ScanHeader};
 use jpeg::huffman;
@@ -164,8 +163,6 @@ impl<'a> JPEGDecoder<'a> {
         // Number of blocks in x and y direction
         let num_blocks_x = (self.dimensions.0 + 7) / 8;
         let num_blocks_y = (self.dimensions.1 + 7) / 8;
-        println!("num_blocks_x: {}", num_blocks_x);
-        println!("num_blocks_y: {}", num_blocks_y);
         let num_blocks = num_blocks_x * num_blocks_y;
 
         let num_components = self.component_fields.len();
@@ -194,8 +191,6 @@ impl<'a> JPEGDecoder<'a> {
 
         let skip_factor = max_block_vert_scale * max_block_hori_scale;
         let num_read_blocks = (num_blocks + skip_factor - 1) / skip_factor;
-        println!("num_blocks: {}", num_blocks);
-        println!("num_read_blocks: {}", num_read_blocks);
 
         // Step 1: Read encoded data
         for _ in 0..num_read_blocks {
@@ -219,45 +214,12 @@ impl<'a> JPEGDecoder<'a> {
                 }
             }
         }
-        println!("Read all blocks");
-        for i in 0..self.component_fields.len() {
-            println!("len {}: {}", i, blocks[i].len());
-        }
 
         // Step 2: get color data
         // Now all decoded blocks are in `blocks`.
         // For each block, do dequantization, reverse zigzag, and inverse DCT.
+        let mut image_data = (0..num_components).map(|_| vec![]).collect::<Vec<_>>();
         for (component_i, component) in self.component_fields.iter().enumerate() {
-
-            // if `component.vertical_sampling_factor` > 1, we need to reorder the
-            // blocks somewhat (see JPEG Figure A.3)
-            if max_block_vert_scale > 1 && component.vertical_sampling_factor > 1 {
-                let (xs, ys) = blocks.remove(component_i)
-                    .into_iter()
-                    .chunks_lazy((component.horizontal_sampling_factor *
-                                 component.vertical_sampling_factor) as usize)
-                    .into_iter()
-                    .fold((vec![], vec![]), |mut acc, mut chunks| {
-                        let mut iter = chunks.into_iter();
-                        for _ in 0..component.horizontal_sampling_factor {
-                            acc.0.push(iter.next().unwrap());
-                        }
-                        for _ in 0..component.vertical_sampling_factor {
-                            acc.1.push(iter.next().unwrap());
-                        }
-                        acc
-                    });
-
-                let fixed: Vec<_> = xs.into_iter()
-                    .zip(ys)
-                    .flat_map(|(a, b)| vec![a, b])
-                    .collect();
-
-                println!("comp {}: {}", component_i, fixed.len());
-                blocks.insert(component_i, fixed);
-            }
-
-
             let quant_table = self.quantization_tables[component.quantization_id as usize]
                 .as_ref()
                 .expect(&format!("Did not find quantization table for {}",
@@ -273,6 +235,7 @@ impl<'a> JPEGDecoder<'a> {
                 .map(|block| transform::discrete_cosine_transform_inverse(&block))
                 .collect();
 
+
             // See JPEG A.1.1
             let x_i = (self.dimensions.0 as f32 *
                        (component.horizontal_sampling_factor as f32 / max_block_hori_scale as f32))
@@ -284,107 +247,46 @@ impl<'a> JPEGDecoder<'a> {
 
             // `?_factor` are how many times each block needs to be repeated
             // in its direction.
-            let x_factor = (self.dimensions.0 as f32 / x_i).ceil() as u32;
-            let y_factor = (self.dimensions.1 as f32 / y_i).ceil() as u32;
+            let x_factor = (self.dimensions.0 as f32 / x_i).ceil() as usize;
+            let y_factor = (self.dimensions.1 as f32 / y_i).ceil() as usize;
+            let stride = num_blocks_x * 8;
 
-            // See Figure A.3 in JPEG spec
-            match (x_factor, y_factor) {
-                (1, 1) => {}
-                (1, 2) => {}
-                (2, 1) => {}
-                (2, 2) => {}
-                _ => unreachable!(),
-            }
-
-            if x_factor == 1 {
-                blocks[component_i] = component_blocks;
-            } else if x_factor == 2 {
-                blocks[component_i] = component_blocks.iter()
-                    .flat_map(|block| {
-                        let (a, b) = expand_block_x_2(block);
-                        vec![a, b]
-                    })
-                    .collect();
-            } else {
-                panic!("Fix expansion above x factor=2");
-            }
-            println!("after x: {}", blocks[component_i].len());
-
-
-            if y_factor == 2 {
-                let mut bls: Vec<Block> =
-                    repeat(repeat(128.0).take(64).collect()).take(num_blocks).collect();
-                let mut read_i = 0;
-                let mut i = 0;
-                while read_i < blocks[component_i].len() {
-                    if i + num_blocks_x >= num_blocks {
-                        // Why??
-                        break;
-                    }
-
-                    for n in 0..num_blocks_x {
-                        let (a, b) = expand_block_y_2(&blocks[component_i][read_i]);
-                        bls[i] = a;
-                        bls[i + num_blocks_x] = b;
-                        read_i += 1;
-                        i += 1;
-                    }
-                    i += num_blocks_x;
-                }
-                blocks[component_i] = bls;
-            } else if y_factor != 1 {
-                panic!("Fix expansion above y factor=2");
-            }
-            println!("after y: {}", blocks[component_i].len());
-        }
-
-        // Step 3: Merge color data
-        let rgb_blocks: Vec<Vec<(u8, u8, u8)>> = if num_components == 3 {
-                blocks[0]
-                    .iter()
-                    .zip(blocks[1].iter())
-                    .zip(blocks[2].iter())
-                    .map(|((y_block, cb_block), cr_block)| {
-                        y_block.iter()
-                            .zip(cb_block.iter())
-                            .zip(cr_block.iter())
-                            .map(|((&y, &cb), &cr)| y_cb_cr_to_rgb(y, cb, cr))
-                            .collect()
-                    })
-                    .collect()
-            } else {
-                blocks[0]
-                    .iter()
-                    .map(|block| {
-                        block.iter()
-                            .map(|&g| (g, g, g))
-                            .collect()
-                    })
-                    .collect::<Vec<Vec<(f32, f32, f32)>>>()
-            }
-            .iter()
-            .map(|block| {
-                block.iter()
-                    .map(|&(r, g, b)| {
-                        (f32_to_u8(r + 128.0), f32_to_u8(g + 128.0), f32_to_u8(b + 128.0))
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let mut image_data: Vec<(u8, u8, u8)> = Vec::with_capacity(num_blocks * 64);
-        for block_y in 0..num_blocks_y {
-            for line in 0..8 {
-                for block_x in 0..num_blocks_x {
-                    let block_index = num_blocks_x * block_y + block_x;
-                    let block = &rgb_blocks[block_index];
-                    for row in 0..8 {
-                        let in_block_index = 8 * line + row;
-                        image_data.push(block[in_block_index]);
-                    }
+            let num_pixels = self.dimensions.0 * self.dimensions.1;
+            let mut data = repeat(0.0)
+                .take(num_pixels)
+                .collect::<Vec<f32>>();
+            let mut block_i = 0;
+            for y in 0..num_blocks_y / y_factor {
+                for x in 0..num_blocks_x / x_factor {
+                    JPEGDecoder::fill_block_in_array(&component_blocks[block_i],
+                                                     data.as_mut_slice(),
+                                                     x_factor,
+                                                     y_factor,
+                                                     x,
+                                                     y,
+                                                     stride);
+                    block_i += 1;
                 }
             }
+
+            image_data[component_i] = data;
         }
+
+        let image_data = if num_components == 1 {
+            image_data[0]
+                .iter()
+                .map(|&b| {
+                    let u = f32_to_u8(b + 128.0);
+                    (u, u, u)
+                })
+                .collect::<Vec<(u8, u8, u8)>>()
+        } else if num_components == 3 {
+            izip!(&image_data[0], &image_data[1], &image_data[2])
+                .map(|(&y, &cb, &cr)| y_cb_cr_to_rgb(y, cb, cr))
+                .collect::<Vec<(u8, u8, u8)>>()
+        } else {
+            panic!("asd")
+        };
 
         // A scan must end on a byte boundary. If we are into the next byte,
         // increment by one. Subtract `4` for the four bytes taht are
@@ -396,6 +298,33 @@ impl<'a> JPEGDecoder<'a> {
         } - 4;
 
         (image_data, bytes_read)
+    }
+
+
+
+    fn fill_block_in_array(block: &Vec<f32>,
+                           target: &mut [f32],
+                           x_scale: usize,
+                           y_scale: usize,
+                           x: usize,
+                           y: usize,
+                           stride: usize) {
+        block.into_iter()
+            .flat_map(|n| repeat(n).take(x_scale))
+            .chunks_lazy(8 * x_scale)
+            .into_iter()
+            .enumerate()
+            .map(|(line_number, line)| {
+                let start_i = y * 8 * y_scale * stride + line_number * stride + x * 8 * x_scale;
+                for (ind, &n) in line.enumerate() {
+                    let i = ind + start_i;
+                    for j in 0..y_scale {
+                        target[i + j * stride] = n;
+                    }
+                }
+            })
+            .last();
+
     }
 }
 
@@ -409,7 +338,7 @@ fn f32_to_u8(n: f32) -> u8 {
     }
 }
 
-fn y_cb_cr_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
+fn y_cb_cr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
     let c_red: f32 = 0.299;
     let c_green: f32 = 0.587;
     let c_blue: f32 = 0.114;
@@ -418,50 +347,9 @@ fn y_cb_cr_to_rgb(y: f32, cb: f32, cr: f32) -> (f32, f32, f32) {
     let b = cb * (2.0 - 2.0 * c_blue) + y;
     let g = (y - c_blue * b - c_red * r) / c_green;
 
-    (r, g, b)
+    (f32_to_u8(r + 128.0), f32_to_u8(g + 128.0), f32_to_u8(b + 128.0))
 }
 
-fn expand_block_x_2(block: &BlockSlice) -> (Block, Block) {
-    // Expand a block along the x axis:
-    //
-    //  |1 2|      |1 1| |2 2|
-    //  |3 4|  --> |3 3| |4 4|
-
-    // Assume 8x8 block:
-    assert!(block.len() == 64,
-            "Implement me properly! (len={})",
-            block.len());
-
-    let mut block_a = Vec::new();
-    let mut block_b = Vec::new();
-    for (i, &n) in block.iter().enumerate() {
-        let is_block_a = i % 8 < 4;
-        if is_block_a {
-            block_a.push(n);
-            block_a.push(n);
-        } else {
-            block_b.push(n);
-            block_b.push(n);
-        }
-    }
-    (block_a, block_b)
-}
-
-fn expand_block_y_2(block: &Block) -> (Block, Block) {
-    let mut block_a = Vec::new();
-    let mut block_b = Vec::new();
-    for &n in block.iter().take(32) {
-        block_a.push(n);
-        block_a.push(n);
-    }
-    for &n in block.iter().skip(32) {
-        block_b.push(n);
-        block_b.push(n);
-    }
-    (block_a, block_b)
-}
-
-// hardcode dis shit lol
 const ZIGZAG_INDICES: [usize; 64] =
     [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27,
      20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58,
