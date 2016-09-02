@@ -164,7 +164,6 @@ impl<'a> JPEGDecoder<'a> {
         let num_blocks_x = (self.dimensions.0 + 7) / 8;
         let num_blocks_y = (self.dimensions.1 + 7) / 8;
         let num_blocks = num_blocks_x * num_blocks_y;
-
         let num_components = self.component_fields.len();
 
         // 2D vector, one vector for each component.
@@ -249,21 +248,64 @@ impl<'a> JPEGDecoder<'a> {
             // in its direction.
             let x_factor = (self.dimensions.0 as f32 / x_i).ceil() as usize;
             let y_factor = (self.dimensions.1 as f32 / y_i).ceil() as usize;
-            let stride = num_blocks_x * 8;
+            let stride = self.dimensions.0;
 
             let num_pixels = self.dimensions.0 * self.dimensions.1;
             let mut data = repeat(0.0)
                 .take(num_pixels)
                 .collect::<Vec<f32>>();
             let mut block_i = 0;
+
+            let get_indices =
+                |x, y, max_x, max_y, x_factor, y_factor, max_x_factor, max_y_factor| {
+                    if max_y_factor > 1 && y_factor == 1 {
+                        if max_x_factor > 1 && x_factor == 1 {
+                            let is_upper = y & 1 == 0;
+                            if is_upper {
+                                let move_down = (x / 2) & 1 == 1;
+                                if move_down {
+                                    return (x / 2 - 1 + (x & 1), y + 1);
+                                } else {
+                                    return (x / 2 + (x & 1), y);
+                                }
+                            } else {
+                                let move_up = y > 0 && (x / 2) & 1 == 0;
+                                if move_up {
+                                    return (max_x / 2 + x / 2 - 1 + (x & 1), y);
+                                } else {
+                                    return (max_x / 2 + x / 2 + (x & 1), y - 1);
+                                }
+                            }
+                        } else {
+                            if y & 1 == 0 {
+                                return (x / 2, y + (x & 1));
+                            } else {
+                                return (x / 2 + max_x / 2, y - (x & 1));
+                            }
+                        }
+                    }
+                    (x, y)
+                };
+
             for y in 0..num_blocks_y / y_factor {
                 for x in 0..num_blocks_x / x_factor {
+                    let (x_i, y_i) = get_indices(x,
+                                                 y,
+                                                 num_blocks_x,
+                                                 num_blocks_y,
+                                                 x_factor,
+                                                 y_factor,
+                                                 max_block_hori_scale,
+                                                 max_block_vert_scale);
+                    if x_i >= num_blocks_x || y_i >= num_blocks_y {
+                        // break;
+                    }
                     JPEGDecoder::fill_block_in_array(&component_blocks[block_i],
                                                      data.as_mut_slice(),
                                                      x_factor,
                                                      y_factor,
-                                                     x,
-                                                     y,
+                                                     x_i,
+                                                     y_i,
                                                      stride);
                     block_i += 1;
                 }
@@ -309,17 +351,26 @@ impl<'a> JPEGDecoder<'a> {
                            x: usize,
                            y: usize,
                            stride: usize) {
+        // println!("x = {}", x);
         block.into_iter()
             .flat_map(|n| repeat(n).take(x_scale))
             .chunks_lazy(8 * x_scale)
             .into_iter()
             .enumerate()
             .map(|(line_number, line)| {
-                let start_i = y * 8 * y_scale * stride + line_number * stride + x * 8 * x_scale;
+                let start_x = x * 8 * x_scale;
+                // println!("stride: {}\tstart_x: {}", stride, start_x);
+                if stride < start_x {
+                    return;
+                }
+                let max_i = stride - start_x;
+                let start_i = y * 8 * y_scale * stride + line_number * stride + start_x;
                 for (ind, &n) in line.enumerate() {
                     let i = ind + start_i;
                     for j in 0..y_scale {
-                        target[i + j * stride] = n;
+                        if i + j * stride < target.len() {
+                            target[i + j * stride * 8] = n;
+                        }
                     }
                 }
             })

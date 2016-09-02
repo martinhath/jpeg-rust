@@ -125,7 +125,7 @@ impl<'a> HuffmanDecoder<'a> {
         // TODO: Revisit this: is it weird to read from `data` in
         // the constructor?
         let current = ((data[0] as u32) << 24) | ((data[1] as u32) << 16) |
-                      ((data[2] as u32) << 8 ) |  (data[3] as u32);
+                      ((data[2] as u32) << 8) | (data[3] as u32);
         HuffmanDecoder {
             data: data,
             next_index: 4,
@@ -148,7 +148,7 @@ impl<'a> HuffmanDecoder<'a> {
         // `(num_bits)(value)`, where `value` is _not_ huffman encoded,
         // but `num_bits` is.
         // TODO: remove `expect`
-        let num_bits = self.next_code(dc_table);// .expect("Could not infer next code") as usize;
+        let num_bits = self.next_code(dc_table);
         if num_bits.is_none() {
             println!("DC lookup fail");
             println!("current_16 = {:016b}", (self.current >> 16) & 0xffff);
